@@ -62,3 +62,5 @@ jobs:
           python-version: "3.12"
       - name: Ownership, persistence, immutable snapshots and package regression
         run: uv run pytest -q tests/unit/db/test_product_library_repo.py tests/unit/db/test_product_package_export.py
+
+# probe: 验证 fork 内 Actions 是否可运行（该分支仅用于探针，不合并）
