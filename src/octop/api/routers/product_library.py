@@ -17,6 +17,7 @@ from octop.api.common.workspace import require_running_workspace
 from octop.api.deps import current_user, get_server
 from octop.config import DEFAULT_MAX_UPLOAD_MB, upload_mb_to_bytes
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.product_library.audio import load_catalog, pick_track, track_path
 from octop.infra.product_library.llm_video_planner import generate_model_plan
 from octop.infra.product_library.narration import (
     PAID_VOICE_PRESETS,
@@ -163,6 +164,70 @@ async def narration_options(
         "modes": ["off", "local"] if not premium else ["off", "local", "bundled"],
         "voices": list(PAID_VOICE_PRESETS) if premium else [],
     }
+
+
+@router.get(
+    "/product-library/bgm-options",
+    summary="List background music available for the current package",
+)
+async def bgm_options(
+    user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> dict[str, Any]:
+    """Catalogue metadata only — never a preview URL.
+
+    Mixkit's licence allows these tracks inside a finished video but forbids
+    redistributing the audio files themselves, so the client picks a track by
+    name and the server copies it into the package at export time.
+    """
+    root = server.services.paths.bgm_library_dir
+    tracks = await asyncio.to_thread(load_catalog, root)
+    default = await asyncio.to_thread(pick_track, root)
+    return {
+        "default": default.id if default else "",
+        "items": [
+            {
+                "id": track.id,
+                "name": track.name,
+                "category": track.category,
+                "bpm": track.bpm,
+                "bar": track.bar_seconds,
+                "author": track.author,
+            }
+            for track in tracks
+        ],
+    }
+
+
+@router.get(
+    "/product-library/bgm/{track_id}/stream",
+    response_class=FileResponse,
+    summary="Audition one background track",
+    description=(
+        "Streams a catalogue track to the signed-in account so the picker can be "
+        "auditioned in place. Range requests are honoured so the browser can seek. "
+        "The track is never offered as a downloadable file: it carries no "
+        "Content-Disposition and is never cached publicly, because the licence "
+        "covers use inside a finished video rather than redistribution."
+    ),
+)
+async def stream_bgm(
+    track_id: str,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> FileResponse:
+    root = server.services.paths.bgm_library_dir
+    track = await asyncio.to_thread(pick_track, root, track_id)
+    path = await asyncio.to_thread(track_path, root, track) if track else None
+    if path is None:
+        raise OctopError.localized(ErrorCode.NOT_FOUND)
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Accept-Ranges": "bytes",
+        },
+    )
 
 
 @router.get(
@@ -393,6 +458,7 @@ class StoryboardDraftBody(BaseModel):
     narration_enabled: bool = False
     narration_voice: str | None = None
     bgm_id: str | None = None
+    bgm_enabled: bool = True
 
 
 @router.post(
@@ -427,6 +493,7 @@ async def generate_storyboard(
         narration_enabled=bool(previous.get("narration_enabled")) if previous else False,
         narration_voice=(previous.get("narration_voice") or None) if previous else None,
         bgm_id=(previous.get("bgm_id") or None) if previous else None,
+        bgm_enabled=bool(previous.get("bgm_enabled", True)) if previous else True,
     )
     return {"generator": plan["generator"], "draft": draft}
 
@@ -470,6 +537,7 @@ async def update_storyboard(
             narration_enabled=body.narration_enabled,
             narration_voice=resolve_voice_preset(body.narration_voice),
             bgm_id=body.bgm_id,
+            bgm_enabled=body.bgm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -524,6 +592,7 @@ async def download_storyboard_package(
         premium=premium and bool(voice_clips),
         voice_id=voice_id,
         bgm_id=draft.get("bgm_id"),
+        bgm_enabled=bool(draft.get("bgm_enabled", True)),
         voice_clips=voice_clips,
         voice_durations=voice_durations,
         narration_degraded=degraded,

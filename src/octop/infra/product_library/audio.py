@@ -275,6 +275,7 @@ def build_package_audio(
     premium: bool = False,
     voice_id: str | None = None,
     bgm_id: str | None = None,
+    bgm_enabled: bool = True,
     voice_clips: dict[str, Path] | None = None,
     voice_durations: dict[str, float] | None = None,
     degraded: bool = False,
@@ -287,13 +288,18 @@ def build_package_audio(
     instead of to a guess. When no clip is available but narration is on, the
     plan declares the clip names the desktop client is expected to synthesise
     locally.
+
+    ``bgm_enabled`` is separate from ``bgm_id`` because "pick the default
+    track" and "no music at all" must be distinguishable: a ``None`` id means
+    the catalogue default, while ``bgm_enabled=False`` drops music entirely and
+    with it the beat grid that scene durations are snapped to.
     """
     scenes = script.get("scenes") or []
     if not isinstance(scenes, list) or not scenes:
         return None
 
     mode = resolve_narration(enabled=narration_enabled, premium=premium)
-    track = pick_track(library_root, bgm_id) if library_root.is_dir() else None
+    track = pick_track(library_root, bgm_id) if bgm_enabled and library_root.is_dir() else None
     if track is not None and track_path(library_root, track) is None:
         track = None
 

@@ -37,6 +37,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   productLibraryApi,
+  type BgmOptions,
   type NarrationOptions,
   type Product,
   type ProductAsset,
@@ -197,6 +198,13 @@ export default function ProductVideoWizardPage() {
     useState<NarrationOptions | null>(null);
   const [narrationEnabled, setNarrationEnabled] = useState(false);
   const [narrationVoice, setNarrationVoice] = useState("");
+  const [bgmOptions, setBgmOptions] = useState<BgmOptions | null>(null);
+  const [bgmEnabled, setBgmEnabled] = useState(true);
+  const [bgmId, setBgmId] = useState("");
+  // Auditioning is single-track on purpose: starting a second preview stops the
+  // first, so the wizard never plays two soundtracks over each other.
+  const [bgmPreview, setBgmPreview] = useState("");
+  const bgmPreviewRef = useRef<HTMLAudioElement | null>(null);
   const environmentSupported = desktopVideo.environmentSupported === true;
   const environmentStatus = desktopVideo.environmentStatus;
   const environmentReady =
@@ -243,9 +251,54 @@ export default function ProductVideoWizardPage() {
     };
   }, []);
 
+  // The BGM catalogue is static per deployment, so one fetch per wizard visit
+  // is enough. An empty list simply hides the picker and the export keeps the
+  // server's default track.
+  useEffect(() => {
+    let active = true;
+    void productLibraryApi
+      .bgmOptions()
+      .then((options) => {
+        if (active) setBgmOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const cleanUrls = () => {
     Object.values(urlsRef.current).forEach(URL.revokeObjectURL);
     urlsRef.current = {};
+  };
+
+  // Leaving the wizard must not leave a soundtrack playing behind it.
+  useEffect(
+    () => () => {
+      bgmPreviewRef.current?.pause();
+      bgmPreviewRef.current = null;
+    },
+    [],
+  );
+
+  const toggleBgmPreview = (trackId: string) => {
+    const playing = bgmPreviewRef.current;
+    if (bgmPreview === trackId && playing) {
+      playing.pause();
+      bgmPreviewRef.current = null;
+      setBgmPreview("");
+      return;
+    }
+    playing?.pause();
+    const audio = new Audio(productLibraryApi.bgmStreamUrl(trackId));
+    audio.onended = () => setBgmPreview("");
+    audio.onerror = () => {
+      setBgmPreview("");
+      message.error(t("videoWizard.bgmPreviewFailed"));
+    };
+    bgmPreviewRef.current = audio;
+    setBgmPreview(trackId);
+    void audio.play().catch(() => setBgmPreview(""));
   };
 
   useEffect(() => {
@@ -297,6 +350,8 @@ export default function ProductVideoWizardPage() {
                 setRequest(loaded.request);
                 setNarrationEnabled(loaded.narration_enabled === true);
                 setNarrationVoice(loaded.narration_voice || "");
+                setBgmEnabled(loaded.bgm_enabled !== false);
+                setBgmId(loaded.bgm_id || "");
                 const restoredBrief = decodeVideoBrief(
                   loaded.request.instructions,
                 );
@@ -715,6 +770,8 @@ export default function ProductVideoWizardPage() {
         confirmed,
         narration_enabled: narrationEnabled,
         narration_voice: narrationVoice,
+        bgm_enabled: bgmEnabled,
+        bgm_id: bgmId || undefined,
       });
       if (version !== requestVersion.current) return;
       setDraft(updated);
@@ -1497,6 +1554,84 @@ export default function ProductVideoWizardPage() {
                         <span className={styles.narrationHint}>
                           {t("videoWizard.narrationLocalHint")}
                         </span>
+                      ) : null}
+                    </div>
+                    <div className={styles.narrationRow}>
+                      <Checkbox
+                        checked={bgmEnabled}
+                        disabled={busy}
+                        onChange={(e) => {
+                          setBgmEnabled(e.target.checked);
+                          if (!e.target.checked) {
+                            bgmPreviewRef.current?.pause();
+                            bgmPreviewRef.current = null;
+                            setBgmPreview("");
+                          }
+                          setSaved(false);
+                          setDraft((current) =>
+                            current ? { ...current, confirmed: false } : current,
+                          );
+                        }}
+                      >
+                        {t("videoWizard.bgm")}
+                      </Checkbox>
+                      {bgmEnabled && bgmOptions?.items.length ? (
+                        <>
+                          <Select
+                            size="small"
+                            showSearch
+                            optionFilterProp="label"
+                            aria-label={t("videoWizard.bgmTrack")}
+                            value={bgmId || bgmOptions.default || undefined}
+                            onChange={(value) => {
+                              setBgmId(value ?? "");
+                              setSaved(false);
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, confirmed: false }
+                                  : current,
+                              );
+                            }}
+                            placeholder={t("videoWizard.bgmTrack")}
+                            options={bgmOptions.items.map((track) => ({
+                              value: track.id,
+                              label: track.bpm
+                                ? `${track.name} · ${Math.round(track.bpm)} BPM`
+                                : track.name,
+                            }))}
+                          />
+                          {(() => {
+                            const current =
+                              bgmId || bgmOptions.default || "";
+                            if (!current) return null;
+                            const playing = bgmPreview === current;
+                            return (
+                              <Button
+                                size="small"
+                                type="text"
+                                disabled={busy}
+                                aria-label={
+                                  playing
+                                    ? t("videoWizard.bgmPreviewStop")
+                                    : t("videoWizard.bgmPreview")
+                                }
+                                title={
+                                  playing
+                                    ? t("videoWizard.bgmPreviewStop")
+                                    : t("videoWizard.bgmPreview")
+                                }
+                                icon={
+                                  playing ? (
+                                    <X size={14} />
+                                  ) : (
+                                    <Play size={14} />
+                                  )
+                                }
+                                onClick={() => toggleBgmPreview(current)}
+                              />
+                            );
+                          })()}
+                        </>
                       ) : null}
                     </div>
                     <Input.TextArea

@@ -1,4 +1,5 @@
-import { request, requestBlob, requestUpload } from "../request";
+import { getApiUrl } from "../config";
+import { getAuthToken, request, requestBlob, requestUpload } from "../request";
 
 export interface Product {
   id: string;
@@ -82,6 +83,7 @@ export interface StoryboardDraft {
   narration_enabled?: boolean;
   narration_voice?: string;
   bgm_id?: string;
+  bgm_enabled?: boolean;
 }
 
 /** Voice presets the current account may pick. */
@@ -95,6 +97,22 @@ export interface NarrationOptions {
   premium: boolean;
   modes: Array<"off" | "local" | "bundled">;
   voices: NarrationVoice[];
+}
+
+/** One background track. Metadata only: the audio is never served on its own. */
+export interface BgmTrack {
+  id: string;
+  name: string;
+  category: string;
+  bpm: number;
+  bar: number;
+  author: string;
+}
+
+/** Background-music catalogue available to every account. */
+export interface BgmOptions {
+  default: string;
+  items: BgmTrack[];
 }
 
 export const productLibraryApi = {
@@ -183,7 +201,7 @@ export const productLibraryApi = {
       Partial<
         Pick<
           StoryboardDraft,
-          "narration_enabled" | "narration_voice" | "bgm_id"
+          "narration_enabled" | "narration_voice" | "bgm_id" | "bgm_enabled"
         >
       >,
   ) =>
@@ -193,6 +211,21 @@ export const productLibraryApi = {
     ),
   narrationOptions: () =>
     request<NarrationOptions>("/product-library/narration-options"),
+  bgmOptions: () => request<BgmOptions>("/product-library/bgm-options"),
+  /**
+   * URL for auditioning one track in a plain ``<audio>`` element.
+   *
+   * The JWT rides in ``access_token`` because an audio element cannot set an
+   * Authorization header. Nothing is ever offered for download: the response
+   * carries no Content-Disposition, so the browser can only play it in place.
+   */
+  bgmStreamUrl: (trackId: string) => {
+    const token = getAuthToken();
+    const qs = token ? `?access_token=${encodeURIComponent(token)}` : "";
+    return getApiUrl(
+      `/product-library/bgm/${encodeURIComponent(trackId)}/stream${qs}`,
+    );
+  },
   downloadStoryboardPackage: (projectId: string) =>
     requestBlob(`/product-library/projects/${projectId}/storyboard-package`),
 };

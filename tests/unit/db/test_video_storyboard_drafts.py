@@ -54,3 +54,20 @@ def test_reject_invalid_duration_and_duplicate_ids():
     script["scenes"][1]["id"] = script["scenes"][0]["id"]
     with pytest.raises(ValueError):
         validate_script(script, snap, req)
+
+
+def test_bgm_choice_is_persisted_and_defaults_on(tmp_path):
+    snap = snapshot()
+    req = VideoPlanRequest()
+    script = validate_script(build_video_plan(snap, req)["script"], snap, req)
+
+    plain = save_draft(tmp_path, 7, "pplain", snap, req, script)
+    assert plain["bgm_enabled"] is True
+    assert plain["bgm_id"] == ""
+
+    muted = save_draft(tmp_path, 7, "pmuted", snap, req, script, bgm_enabled=False)
+    assert muted["bgm_enabled"] is False
+    assert load_draft(tmp_path, 7, "pmuted")["bgm_enabled"] is False
+
+    save_draft(tmp_path, 7, "ppicked", snap, req, script, bgm_id="33")
+    assert load_draft(tmp_path, 7, "ppicked")["bgm_id"] == "33"

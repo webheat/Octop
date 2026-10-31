@@ -205,3 +205,41 @@ def test_missing_library_yields_no_audio_plan(tmp_path: Path) -> None:
 
 def test_empty_script_yields_no_audio_plan(library: Path) -> None:
     assert build_package_audio(library, {"scenes": []}) is None
+
+
+def test_music_can_be_turned_off_entirely(library: Path) -> None:
+    """Turning BGM off must not fall back to the catalogue default."""
+    assert build_package_audio(library, SCRIPT, bgm_enabled=False) is None
+
+    with_voice = build_package_audio(library, SCRIPT, narration_enabled=True, bgm_enabled=False)
+    assert with_voice is not None
+    assert "bgm" not in with_voice.plan
+    assert [name for name, _ in with_voice.files] == []
+    # No music grid means no beat snapping: authored durations stay untouched.
+    assert "duration" not in with_voice.plan["scenes"]["product-title"]
+
+
+def test_explicit_track_wins_over_the_catalogue_default(library: Path) -> None:
+    package = build_package_audio(library, SCRIPT, bgm_id="33")
+    assert package is not None
+    assert package.plan["bgm"]["src"] == "energetic__33__motivating-mornings.mp3"
+    assert [name for name, _ in package.files] == ["energetic__33__motivating-mornings.mp3"]
+
+
+def test_music_can_be_turned_off_entirely(library: Path) -> None:
+    """Turning BGM off must not fall back to the catalogue default."""
+    assert build_package_audio(library, SCRIPT, bgm_enabled=False) is None
+
+    with_voice = build_package_audio(library, SCRIPT, narration_enabled=True, bgm_enabled=False)
+    assert with_voice is not None
+    assert "bgm" not in with_voice.plan
+    assert [name for name, _ in with_voice.files] == []
+    # No music grid means no beat snapping: authored durations stay untouched.
+    assert "duration" not in with_voice.plan["scenes"]["product-title"]
+
+
+def test_explicit_track_wins_over_the_catalogue_default(library: Path) -> None:
+    package = build_package_audio(library, SCRIPT, bgm_id="33")
+    assert package is not None
+    assert package.plan["bgm"]["src"] == "energetic__33__motivating-mornings.mp3"
+    assert [name for name, _ in package.files] == ["energetic__33__motivating-mornings.mp3"]

@@ -637,6 +637,11 @@
     "narration": "生成配音（需桌面客户端）",
     "narrationVoice": "选择音色",
     "narrationLocalHint": "免费音色由本机 Windows 语音合成",
+    "bgm": "配乐",
+    "bgmTrack": "选择配乐",
+    "bgmPreview": "试听",
+    "bgmPreviewStop": "停止试听",
+    "bgmPreviewFailed": "试听失败，请检查网络后重试",
     "narrationUnavailable": "配音仅在桌面客户端可用"
   },
   "skillPackages": {

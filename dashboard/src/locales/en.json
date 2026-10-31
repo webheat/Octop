@@ -637,6 +637,11 @@
     "narration": "Generate narration (desktop client only)",
     "narrationVoice": "Select a voice",
     "narrationLocalHint": "Free narration uses the local Windows voice",
+    "bgm": "Background music",
+    "bgmTrack": "Choose a track",
+    "bgmPreview": "Preview",
+    "bgmPreviewStop": "Stop preview",
+    "bgmPreviewFailed": "Could not preview this track. Check the connection and retry.",
     "narrationUnavailable": "Narration is available in the desktop client only"
   },
   "skillPackages": {
