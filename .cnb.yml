@@ -4,10 +4,14 @@
 # 被禁用（token 无 admin 权限，workflow_dispatch 返回 422），CNB 是唯一能跑
 # CI 的地方；本机也没有 make，pre-commit 的完整门禁跑不起来。
 #
-#   push 到 main  → 全量质量门禁（ruff / mypy / pytest）
-#   推送 v* tag   → 质量门禁 → 构建 Dashboard → 建 Release → 挂前端产物
+#   push 到 main           → 全量质量门禁（ruff / mypy / pytest）
+#   推送 v* tag            → 质量门禁 → 构建 Dashboard → 建 Release → 挂产物
+#   api_trigger_release    → 与 tag 流水线同一条链路，target tag 由 RELEASE_TAG 传入
 #
-# tag 流水线里质量门禁排在最前：测试不过就不该产出可下载的发版产物。
+# 为什么还要一条 api_trigger 的发版流水线：git 凭据里的 access token 只有 git
+# 相关 scope，读不到 /-/build/logs（需要 repo-cnb-history:r），tag_push 的流水线
+# 一旦失败就成了黑盒。走 API 触发可以直接拿到构建号，再用
+# /-/build/status/{sn} 查状态与失败阶段。
 
 main:
   push:
@@ -32,8 +36,8 @@ main:
           script: |
             pytest -n 4 -m "not live" -q
 
-$:
-  tag_push:
+  # 手动补发/重发一次发行版：tag 已经在远端，只需要重新构建并挂产物。
+  api_trigger_release:
     - name: release
       docker:
         image: python:3.12-bookworm
@@ -42,20 +46,22 @@ $:
         # 构建产物由 /videogen 子路径提供，与线上 nginx 的挂载保持一致。
         BASE_URL: /videogen
       stages:
-        - name: install backend deps
+        - name: check target tag
+          script: |
+            test -n "$RELEASE_TAG" || { echo "RELEASE_TAG is required"; exit 1; }
+            echo "releasing $RELEASE_TAG"
+
+        - name: install
           script: |
             python -V
             pip install -e ".[dev]"
-
         - name: lint
           script: |
             ruff check src tests
             ruff format --diff src tests
-
         - name: typecheck
           script: |
             mypy src/octop
-
         - name: test
           script: |
             pytest -n 4 -m "not live" -q
@@ -71,6 +77,59 @@ $:
             cd ..
             mkdir -p dist-release
             # 产物目录在 .gitignore 里（不入库），所以必须现构建现打包。
+            tar -czf "dist-release/octop-dashboard-${RELEASE_TAG}.tar.gz" \
+              -C src/octop/dashboard .
+            ls -lh dist-release/
+
+        - name: create release
+          type: git:release
+          options:
+            tag: ${RELEASE_TAG}
+            title: ${RELEASE_TAG}
+            descriptionFromFile: CHANGELOG.md
+
+        # git:release 只把源码打包上传，任意产物要靠 attachments 插件，
+        # 且必须在 Release 已存在之后执行。
+        - name: upload dashboard artifact
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "dist-release/*.tar.gz"
+
+$:
+  tag_push:
+    - name: release
+      docker:
+        image: python:3.12-bookworm
+      env:
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        BASE_URL: /videogen
+      stages:
+        - name: install
+          script: |
+            python -V
+            pip install -e ".[dev]"
+        - name: lint
+          script: |
+            ruff check src tests
+            ruff format --diff src tests
+        - name: typecheck
+          script: |
+            mypy src/octop
+
+        # tag 流水线里质量门禁排在最前：测试不过就不该产出可下载的发版产物。
+        - name: test
+          script: |
+            pytest -n 4 -m "not live" -q
+
+        - name: build dashboard
+          image: node:22-bookworm
+          script: |
+            cd dashboard
+            npm ci --registry=https://registry.npmmirror.com --no-audit --no-fund
+            npm run build
+            cd ..
+            mkdir -p dist-release
             tar -czf "dist-release/octop-dashboard-${CNB_BRANCH}.tar.gz" \
               -C src/octop/dashboard .
             ls -lh dist-release/
@@ -82,8 +141,6 @@ $:
             title: ${CNB_BRANCH}
             descriptionFromFile: CHANGELOG.md
 
-        # git:release 只把源码打包上传，任意产物要靠 attachments 插件，
-        # 且必须在 Release 已存在之后执行。
         - name: upload dashboard artifact
           image: cnbcool/attachments:latest
           settings:
