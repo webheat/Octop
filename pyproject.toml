@@ -131,6 +131,7 @@ include = [
     "src/octop/**/*.sql",
     "src/octop/**/*.sh",
     "src/octop/**/*.png",
+    "src/octop/**/*.jpg",
     "src/octop/dashboard/**/*",
     "src/octop/infra/agents/experts/library/**/*",
     "src/octop/infra/agents/plugins/bundled/**/*",
