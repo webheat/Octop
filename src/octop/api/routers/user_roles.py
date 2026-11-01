@@ -31,12 +31,15 @@ from octop.infra.users.permissions import (
 from octop.infra.users.resource_policy import (
     POLICY_MAX_AGENTS,
     POLICY_TOKEN_QUOTA,
+    POLICY_TOKEN_QUOTA_WINDOW,
     POLICY_WORKSPACE_ROOT_DIR,
     max_agents_of,
     normalize_max_agents,
     normalize_token_quota,
+    normalize_token_quota_window,
     normalize_workspace_root_dir,
     token_quota_of,
+    token_quota_window_of,
     workspace_root_dir_of,
 )
 
@@ -45,6 +48,7 @@ router = APIRouter()
 _KNOWN_POLICIES = {
     POLICY_WORKSPACE_ROOT_DIR,
     POLICY_TOKEN_QUOTA,
+    POLICY_TOKEN_QUOTA_WINDOW,
     POLICY_MAX_AGENTS,
 }
 
@@ -135,6 +139,7 @@ def _policies_from_fields(
     *,
     workspace_root_dir: str | None,
     token_quota: int | None,
+    token_quota_window: str | None,
     max_agents: int | None,
 ) -> list[tuple[str, str]]:
     items: list[tuple[str, str]] = []
@@ -144,6 +149,9 @@ def _policies_from_fields(
     quota = normalize_token_quota(token_quota)
     if quota is not None:
         items.append((POLICY_TOKEN_QUOTA, str(quota)))
+    window = normalize_token_quota_window(token_quota_window)
+    if window is not None:
+        items.append((POLICY_TOKEN_QUOTA_WINDOW, window))
     agents = normalize_max_agents(max_agents)
     if agents is not None:
         items.append((POLICY_MAX_AGENTS, str(agents)))
@@ -162,6 +170,9 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
     return _policies_from_fields(
         workspace_root_dir=by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         token_quota=token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
+        # Raw value (not ``*_of``): an unknown alias must fail normalization, not
+        # silently fall back to lifetime accounting.
+        token_quota_window=by_name.get(POLICY_TOKEN_QUOTA_WINDOW),
         max_agents=max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
     )
 
@@ -185,6 +196,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         policies: list[dict[str, str]] = []
         workspace_root_dir = None
         token_quota = None
+        token_quota_window = None
         max_agents = None
     else:
         permissions = expand_permission_grants(list(row.permissions))
@@ -192,6 +204,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         policies = [{"name": name, "value": value} for name, value in row.policies]
         workspace_root_dir = workspace_root_dir_of(row.policy_value(POLICY_WORKSPACE_ROOT_DIR))
         token_quota = token_quota_of(row.policy_value(POLICY_TOKEN_QUOTA))
+        token_quota_window = token_quota_window_of(row.policy_value(POLICY_TOKEN_QUOTA_WINDOW))
         max_agents = max_agents_of(row.policy_value(POLICY_MAX_AGENTS))
     return {
         "user_role_id": row.user_role_id,
@@ -204,6 +217,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         "immutable": row.is_admin,
         "workspace_root_dir": workspace_root_dir,
         "token_quota": token_quota,
+        "token_quota_window": token_quota_window,
         "max_agents": max_agents,
         "created_at": row.created_at,
         "updated_at": row.updated_at,

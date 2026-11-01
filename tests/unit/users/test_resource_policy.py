@@ -16,12 +16,16 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.resource_policy import (
     POLICY_MAX_AGENTS,
     POLICY_TOKEN_QUOTA,
+    POLICY_TOKEN_QUOTA_WINDOW,
     POLICY_WORKSPACE_ROOT_DIR,
     assert_agent_quota_available,
     assert_backend_within_user_root,
     assert_token_quota_available,
+    normalize_token_quota_window,
     normalize_workspace_root_dir,
     public_policy_fields,
+    token_quota_window_of,
+    usage_window_for_quota,
 )
 
 
@@ -115,6 +119,65 @@ def test_assert_token_quota_available(db: SqlitePool) -> None:
     assert_token_quota_available(policies, usage, uid)
 
 
+def test_assert_token_quota_available_windowed(db: SqlitePool) -> None:
+    """A windowed quota only counts tokens inside the window."""
+    import time
+
+    users = UserRepo(db)
+    policies = UserPolicyRepo(db)
+    usage = UsageRepo(db)
+    uid = users.create(username="alice", password_hash="h", role="user")
+    AgentRepo(db).create(agent_id="a1", user_id=uid, name="a")
+    policies.set(uid, POLICY_TOKEN_QUOTA, "10")
+
+    old_ts = int(time.time()) - 3 * 86_400
+    usage.record(
+        agent_id="a1",
+        user_id=uid,
+        input_tokens=6,
+        output_tokens=4,
+        model="m",
+        thread_id="t1",
+        ts=old_ts,
+    )
+    # Lifetime accounting still sees the old row.
+    with pytest.raises(OctopError):
+        assert_token_quota_available(policies, usage, uid)
+
+    policies.set(uid, POLICY_TOKEN_QUOTA_WINDOW, "last_7d")
+    with pytest.raises(OctopError) as exc:
+        assert_token_quota_available(policies, usage, uid)
+    assert exc.value.details["window"] == "last_7d"
+
+    policies.set(uid, POLICY_TOKEN_QUOTA_WINDOW, "today")
+    assert_token_quota_available(policies, usage, uid)
+
+
+def test_token_quota_window_normalization() -> None:
+    assert normalize_token_quota_window("  TODAY ") == "today"
+    assert normalize_token_quota_window(None) is None
+    assert normalize_token_quota_window(" ") is None
+    with pytest.raises(OctopError) as exc:
+        normalize_token_quota_window("weekly")
+    assert exc.value.code is ErrorCode.FORBIDDEN
+    assert exc.value.status == 400
+
+
+def test_token_quota_window_of_falls_back_to_all() -> None:
+    assert token_quota_window_of(None) == "all"
+    assert token_quota_window_of({"enabled": True, "value": "month"}) == "month"
+    assert token_quota_window_of({"enabled": True, "value": "bogus"}) == "all"
+    assert token_quota_window_of({"enabled": False, "value": "month"}) == "all"
+
+
+def test_usage_window_for_quota_expands_day_and_month() -> None:
+    assert usage_window_for_quota("all") == "all"
+    assert usage_window_for_quota("last_7d") == "last_7d"
+    stamp = 1_767_225_600  # 2026-01-01T00:00:00Z
+    assert usage_window_for_quota("day", now=stamp) == "day:2026-01-01"
+    assert usage_window_for_quota("month", now=stamp) == "month:2026-01"
+
+
 def test_assert_agent_quota_available(db: SqlitePool) -> None:
     users = UserRepo(db)
     policies = UserPolicyRepo(db)
@@ -157,6 +220,7 @@ def test_user_policy_repo_named_rows(db: SqlitePool, tmp_path: Path) -> None:
     assert public_policy_fields(policies.list_for_user(uid)) == {
         "workspace_root_dir": str(jail),
         "token_quota": 42,
+        "token_quota_window": "all",
         "max_agents": None,
     }
     root = policies.get(uid, POLICY_WORKSPACE_ROOT_DIR)

@@ -28,8 +28,11 @@ def test_token_quota_middleware_rejects_exhausted_user(
         middleware.before_agent({}, None)
 
     assert exc.value.code is ErrorCode.TOKEN_QUOTA_EXCEEDED
-    assert exc.value.details == {"used": 10, "quota": 10}
-    policies.get.assert_called_once_with(7, "token_quota")
+    assert exc.value.details == {"used": 10, "quota": 10, "window": "all"}
+    assert [c.args for c in policies.get.call_args_list] == [
+        (7, "token_quota"),
+        (7, "token_quota_window"),
+    ]
     usage.total_tokens_for_user.assert_called_once_with(7)
 
 

@@ -402,3 +402,33 @@ async def test_create_user_rejects_unknown_expert_template(env):
     assert created.status_code == 404, created.text
     listed = await c.get("/api/users", headers=auth)
     assert all(item["username"] != "no_expert" for item in listed.json())
+
+
+async def test_role_policy_carries_token_quota_window(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "Windowed",
+            "permissions": [],
+            "policies": [
+                {"name": "token_quota", "value": "100"},
+                {"name": "token_quota_window", "value": "month"},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["token_quota_window"] == "month"
+    assert {"name": "token_quota_window", "value": "month"} in body["policies"]
+
+    rejected = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "WindowedBad",
+            "policies": [{"name": "token_quota_window", "value": "weekly"}],
+        },
+    )
+    assert rejected.status_code == 400, rejected.text
