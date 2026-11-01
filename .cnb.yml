@@ -35,28 +35,29 @@ main:
             pip install uv
             uv --version
         # 用 uv 而不是 pip：pip 解析这份依赖图会回溯十几分钟并最终失败，
-        # uv 的解析器是毫秒级的。装到镜像自带解释器（--system），后面几个
-        # stage 直接用 ruff/mypy/pytest，不必再套一层 uv run。
+        # uv 的解析器是毫秒级的。
         - name: install deps
           script: |
-            uv pip install --system -e ".[dev]"
-            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
-            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
-            # 变成红点，跟提交本身无关。要升级就两边一起升。
-            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
-            python -c "import fastapi, pytest; print('deps ok')"
-            ruff --version
-            mypy --version
+            # 用项目自己的 .venv 而不是往镜像里装（--system）：mypy 会把跟随
+            # 到的依赖模块一起分析，环境里多装的包会凭空多出错误。uv sync 复
+            # 现的正是本机能跑通的那一套。
+            uv sync
+            # 门禁工具钉到与本机一致的版本：pyproject 里 ruff/mypy 都是浮动下
+            # 限，CI 每次拉最新版会把新版本新增的检查变成与提交无关的红点。
+            uv pip install "ruff==0.15.20" "mypy==2.1.0"
+            uv run python -c "import fastapi, pytest; print('deps ok')"
+            uv run ruff --version
+            uv run mypy --version
         - name: lint
           script: |
-            ruff check src tests
-            ruff format --diff src tests
+            uv run ruff check src tests
+            uv run ruff format --diff src tests
         - name: typecheck
           script: |
-            mypy src/octop
+            uv run mypy src/octop
         - name: test
           script: |
-            pytest -n 4 -m "not live" -q
+            uv run pytest -n 4 -m "not live" -q
 
   # 手动补发/重发一次发行版：tag 已经在远端，只需要重新构建并挂产物。
   api_trigger_release:
@@ -83,28 +84,29 @@ main:
             pip install uv
             uv --version
         # 用 uv 而不是 pip：pip 解析这份依赖图会回溯十几分钟并最终失败，
-        # uv 的解析器是毫秒级的。装到镜像自带解释器（--system），后面几个
-        # stage 直接用 ruff/mypy/pytest，不必再套一层 uv run。
+        # uv 的解析器是毫秒级的。
         - name: install deps
           script: |
-            uv pip install --system -e ".[dev]"
-            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
-            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
-            # 变成红点，跟提交本身无关。要升级就两边一起升。
-            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
-            python -c "import fastapi, pytest; print('deps ok')"
-            ruff --version
-            mypy --version
+            # 用项目自己的 .venv 而不是往镜像里装（--system）：mypy 会把跟随
+            # 到的依赖模块一起分析，环境里多装的包会凭空多出错误。uv sync 复
+            # 现的正是本机能跑通的那一套。
+            uv sync
+            # 门禁工具钉到与本机一致的版本：pyproject 里 ruff/mypy 都是浮动下
+            # 限，CI 每次拉最新版会把新版本新增的检查变成与提交无关的红点。
+            uv pip install "ruff==0.15.20" "mypy==2.1.0"
+            uv run python -c "import fastapi, pytest; print('deps ok')"
+            uv run ruff --version
+            uv run mypy --version
         - name: lint
           script: |
-            ruff check src tests
-            ruff format --diff src tests
+            uv run ruff check src tests
+            uv run ruff format --diff src tests
         - name: typecheck
           script: |
-            mypy src/octop
+            uv run mypy src/octop
         - name: test
           script: |
-            pytest -n 4 -m "not live" -q
+            uv run pytest -n 4 -m "not live" -q
         - name: build dashboard
           image: node:22-bookworm
           script: |
@@ -151,29 +153,30 @@ $:
             pip install uv
             uv --version
         # 用 uv 而不是 pip：pip 解析这份依赖图会回溯十几分钟并最终失败，
-        # uv 的解析器是毫秒级的。装到镜像自带解释器（--system），后面几个
-        # stage 直接用 ruff/mypy/pytest，不必再套一层 uv run。
+        # uv 的解析器是毫秒级的。
         - name: install deps
           script: |
-            uv pip install --system -e ".[dev]"
-            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
-            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
-            # 变成红点，跟提交本身无关。要升级就两边一起升。
-            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
-            python -c "import fastapi, pytest; print('deps ok')"
-            ruff --version
-            mypy --version
+            # 用项目自己的 .venv 而不是往镜像里装（--system）：mypy 会把跟随
+            # 到的依赖模块一起分析，环境里多装的包会凭空多出错误。uv sync 复
+            # 现的正是本机能跑通的那一套。
+            uv sync
+            # 门禁工具钉到与本机一致的版本：pyproject 里 ruff/mypy 都是浮动下
+            # 限，CI 每次拉最新版会把新版本新增的检查变成与提交无关的红点。
+            uv pip install "ruff==0.15.20" "mypy==2.1.0"
+            uv run python -c "import fastapi, pytest; print('deps ok')"
+            uv run ruff --version
+            uv run mypy --version
         - name: lint
           script: |
-            ruff check src tests
-            ruff format --diff src tests
+            uv run ruff check src tests
+            uv run ruff format --diff src tests
         - name: typecheck
           script: |
-            mypy src/octop
+            uv run mypy src/octop
         # tag 流水线里质量门禁排在最前：测试不过就不该产出可下载的发版产物。
         - name: test
           script: |
-            pytest -n 4 -m "not live" -q
+            uv run pytest -n 4 -m "not live" -q
         - name: build dashboard
           image: node:22-bookworm
           script: |
