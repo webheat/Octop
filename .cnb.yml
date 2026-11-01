@@ -57,7 +57,21 @@ main:
             uv run mypy src/octop
         - name: test
           script: |
-            uv run pytest -n 4 -m "not live" -q
+            # 失败清单必须能被读到：仓库的 access token 只有 git scope，读不到
+            # /-/build/logs，CI 失败就成黑盒。所以失败时把摘要推到 ci/reports
+            # 分支，用 git 这条唯一可用的通道取回来。
+            uv run pytest -n 4 -m "not live" -q --tb=line > /tmp/pytest.log 2>&1 || true
+            tail -c 20000 /tmp/pytest.log > /tmp/report.txt || true
+            if grep -qE "[0-9]+ (failed|error)" /tmp/pytest.log; then
+              git config user.email "ci@cnb.cool"
+              git config user.name "cnb-ci"
+              cp /tmp/report.txt .ci-pytest-report.txt
+              git add -f .ci-pytest-report.txt
+              git commit -q -m "ci: pytest failures" || true
+              git push origin HEAD:refs/heads/ci/reports --force || echo "report push failed"
+              exit 1
+            fi
+            tail -5 /tmp/pytest.log
 
   # 手动补发/重发一次发行版：tag 已经在远端，只需要重新构建并挂产物。
   api_trigger_release:
@@ -106,7 +120,21 @@ main:
             uv run mypy src/octop
         - name: test
           script: |
-            uv run pytest -n 4 -m "not live" -q
+            # 失败清单必须能被读到：仓库的 access token 只有 git scope，读不到
+            # /-/build/logs，CI 失败就成黑盒。所以失败时把摘要推到 ci/reports
+            # 分支，用 git 这条唯一可用的通道取回来。
+            uv run pytest -n 4 -m "not live" -q --tb=line > /tmp/pytest.log 2>&1 || true
+            tail -c 20000 /tmp/pytest.log > /tmp/report.txt || true
+            if grep -qE "[0-9]+ (failed|error)" /tmp/pytest.log; then
+              git config user.email "ci@cnb.cool"
+              git config user.name "cnb-ci"
+              cp /tmp/report.txt .ci-pytest-report.txt
+              git add -f .ci-pytest-report.txt
+              git commit -q -m "ci: pytest failures" || true
+              git push origin HEAD:refs/heads/ci/reports --force || echo "report push failed"
+              exit 1
+            fi
+            tail -5 /tmp/pytest.log
         - name: build dashboard
           image: node:22-bookworm
           script: |
@@ -176,7 +204,21 @@ $:
         # tag 流水线里质量门禁排在最前：测试不过就不该产出可下载的发版产物。
         - name: test
           script: |
-            uv run pytest -n 4 -m "not live" -q
+            # 失败清单必须能被读到：仓库的 access token 只有 git scope，读不到
+            # /-/build/logs，CI 失败就成黑盒。所以失败时把摘要推到 ci/reports
+            # 分支，用 git 这条唯一可用的通道取回来。
+            uv run pytest -n 4 -m "not live" -q --tb=line > /tmp/pytest.log 2>&1 || true
+            tail -c 20000 /tmp/pytest.log > /tmp/report.txt || true
+            if grep -qE "[0-9]+ (failed|error)" /tmp/pytest.log; then
+              git config user.email "ci@cnb.cool"
+              git config user.name "cnb-ci"
+              cp /tmp/report.txt .ci-pytest-report.txt
+              git add -f .ci-pytest-report.txt
+              git commit -q -m "ci: pytest failures" || true
+              git push origin HEAD:refs/heads/ci/reports --force || echo "report push failed"
+              exit 1
+            fi
+            tail -5 /tmp/pytest.log
         - name: build dashboard
           image: node:22-bookworm
           script: |
