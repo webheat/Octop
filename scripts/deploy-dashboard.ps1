@@ -218,8 +218,12 @@ if ($KeyFile -and (Test-Path -LiteralPath $KeyFile)) {
 # Windows 把参数拼进子进程命令行时会吃掉引号，远端命令里的 awk '{print $1}' 这类引号容易损坏，
 # 所以远端脚本一律 base64 传输后解码执行。
 function Invoke-RemoteScript([string]$script) {
+  # 载荷走 stdin，不走 argv：base64 里含 '/' '+' '=' 等字符，MSYS ssh / Windows 参数拼接
+  # 会把这种长参数改写（实测远端收到的脚本被插入换行，test -d 判假、备份被跳过）。
+  # 统一先把 CRLF 归一成 LF，避免 Linux bash 读到行尾 \r。
+  $script = $script -replace "`r`n", "`n"
   $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
-  $out = & ssh @sshArgs $Target "echo $b64 | base64 -d | bash" 2>&1
+  $out = $b64 | & ssh @sshArgs $Target "tr -d '\r\n' | base64 -d | bash" 2>&1
   $code = $LASTEXITCODE
   return [pscustomobject]@{ Output = $out; Code = $code }
 }
