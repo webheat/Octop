@@ -1069,6 +1069,36 @@ def _seed_user_roles(db: DatabasePool) -> None:
                 ") VALUES ('user', ?, ?, '[]', ?, ?)",
                 ("用户", payload, ts, ts),
             )
+    _seed_premium_role(db, ts)
+
+
+def _seed_premium_role(db: DatabasePool, ts: int) -> None:
+    """Ensure the paid-tier role template exists.
+
+    The role carries the premium narration permission on top of the baseline
+    set, so a paid user keeps every default capability. Existing users are
+    never rewritten — an administrator assigns the role explicitly.
+    """
+    if not _table_exists(db, "user_role"):
+        return
+    from octop.infra.users.permissions import BASELINE_PERMISSIONS
+
+    with db.connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM user_role WHERE user_role_id = ?",
+            ("premium",),
+        ).fetchone()
+    if existing is not None:
+        return
+    permissions = sorted(set(BASELINE_PERMISSIONS) | {"voice_tts_premium"})
+    payload = json.dumps(permissions, ensure_ascii=False)
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO user_role("
+            "user_role_id, user_role_name, permissions, policies, created_at, updated_at"
+            ") VALUES ('premium', ?, ?, '[]', ?, ?)",
+            ("付费用户", payload, ts, ts),
+        )
 
 
 def _ensure_thread_message_projection_schema(db: DatabasePool) -> None:

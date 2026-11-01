@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { validateScript } from "./project.mjs";
+import { loadAudioPlan, mergeAudioPlan, validateScript } from "./project.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENTRY_POINT = path.join(HERE, "src", "index.ts");
@@ -92,6 +92,10 @@ export async function renderProject({ projectDir, outPath, quality = "prod", onP
   }
   const script = JSON.parse(fs.readFileSync(scriptPath, "utf-8"));
   validateScript(script, resolvedProjectDir);
+  // The audio plan carries timing overrides and track references that must not
+  // touch script.json: the desktop client verifies the script hash separately.
+  const audioPlan = loadAudioPlan(resolvedProjectDir);
+  const mergedScript = mergeAudioPlan(script, audioPlan, resolvedProjectDir);
 
   const resolvedOutPath = path.resolve(
     outPath ?? path.join(resolvedProjectDir, "out", "final.mp4"),
@@ -103,6 +107,7 @@ export async function renderProject({ projectDir, outPath, quality = "prod", onP
 
   console.log(`[render] script: ${scriptPath}`);
   console.log(`[render] scenes: ${script.scenes.length}`);
+  console.log(`[render] audio: ${audioPlan ? "plan present" : "none"}`);
   console.log(`[render] output: ${resolvedOutPath} (${draft ? "draft" : "prod"}, scale ${scale})`);
 
   const browserExecutable = selectedBrowser ?? detectBrowser();
@@ -153,7 +158,7 @@ export async function renderProject({ projectDir, outPath, quality = "prod", onP
   });
   console.log(`[render] bundle: ${bundleLocation}`);
 
-  const inputProps = { script };
+  const inputProps = { script: mergedScript };
   const composition = await selectComposition({
     serveUrl: bundleLocation,
     id: "Video",

@@ -172,6 +172,19 @@ if (typeof globalThis.DOMMatrix === "undefined") {
   (globalThis as unknown as { DOMMatrix: unknown }).DOMMatrix = _DOMMatrix;
 }
 
+// jsdom ships no ``URL.createObjectURL`` / ``URL.revokeObjectURL``.
+// Product asset previews download an authenticated blob and turn it into
+// an object URL, and the cleanup path calls ``revokeObjectURL`` — which
+// ``Array.prototype.forEach`` rejects even on an empty array when the
+// callback is not callable. Stub both so the preview lifecycle runs.
+if (typeof URL.createObjectURL !== "function") {
+  let objectUrlSeq = 0;
+  URL.createObjectURL = () => `blob:octop-test/${objectUrlSeq++}`;
+}
+if (typeof URL.revokeObjectURL !== "function") {
+  URL.revokeObjectURL = () => {};
+}
+
 // Auto-mock react-i18next so components' ``t(key, fallback)`` calls
 // resolve synchronously to ``fallback`` without needing the real
 // i18n module (which would async-fetch tool labels and add 1-2s of

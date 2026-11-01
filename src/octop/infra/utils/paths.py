@@ -89,6 +89,16 @@ class PathLayout:
         """Product-library uploads, separated by owner id."""
         return self.root / "product-library"
 
+    @property
+    def bgm_library_dir(self) -> Path:
+        """Royalty-free background music kept outside the repo.
+
+        Mixkit's licence allows commercial use inside finished videos but not
+        redistributing the audio files themselves, so these tracks must never be
+        committed, bundled into the desktop client, or served as raw downloads.
+        """
+        return self.root / "bgm-library"
+
     def agent_workspace(self, agent_id: str) -> Path:
         """Global agent workspace: ~/.octop/agents/<agent_id>/"""
         return self.agents_dir / agent_id

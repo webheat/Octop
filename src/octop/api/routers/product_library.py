@@ -17,14 +17,22 @@ from octop.api.common.workspace import require_running_workspace
 from octop.api.deps import current_user, get_server
 from octop.config import DEFAULT_MAX_UPLOAD_MB, upload_mb_to_bytes
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.product_library.audio import load_catalog, pick_track, track_path
 from octop.infra.product_library.llm_video_planner import generate_model_plan
+from octop.infra.product_library.narration import (
+    PAID_VOICE_PRESETS,
+    has_premium_narration,
+    render_narration_clips,
+    resolve_voice_preset,
+)
 from octop.infra.product_library.package_export import export_project_package
 from octop.infra.product_library.service import (
     ProductLibraryService,
     project_payload,
 )
-from octop.infra.product_library.video_drafts import load_draft, save_draft
+from octop.infra.product_library.video_drafts import delete_draft, load_draft, save_draft
 from octop.infra.product_library.video_planner import VideoPlanRequest, build_video_plan
+from octop.infra.voice.manager import VoiceManager
 
 router = APIRouter()
 
@@ -129,6 +137,97 @@ def _not_found() -> OctopError:
 
 def _service(server: Any) -> ProductLibraryService:
     return ProductLibraryService(server.services.paths, server.services.product_library_repo)
+
+
+def _voice_manager(server: Any) -> VoiceManager:
+    return VoiceManager(
+        settings_repo=server.services.settings_repo,
+        voice_provider_repo=server.services.voice_provider_repo,
+    )
+
+
+@router.get(
+    "/product-library/narration-options",
+    summary="List narration presets available to the current user",
+)
+async def narration_options(
+    user: Any = Depends(current_user),
+) -> dict[str, Any]:
+    """Which voices the caller may pick, and whether narration is available.
+
+    Free accounts use the local Windows voice on the desktop client; paid
+    accounts may pick a MiniMax preset rendered by the server.
+    """
+    premium = has_premium_narration(user)
+    return {
+        "premium": premium,
+        "modes": ["off", "local"] if not premium else ["off", "local", "bundled"],
+        "voices": list(PAID_VOICE_PRESETS) if premium else [],
+    }
+
+
+@router.get(
+    "/product-library/bgm-options",
+    summary="List background music available for the current package",
+)
+async def bgm_options(
+    user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> dict[str, Any]:
+    """Catalogue metadata only — never a preview URL.
+
+    Mixkit's licence allows these tracks inside a finished video but forbids
+    redistributing the audio files themselves, so the client picks a track by
+    name and the server copies it into the package at export time.
+    """
+    root = server.services.paths.bgm_library_dir
+    tracks = await asyncio.to_thread(load_catalog, root)
+    default = await asyncio.to_thread(pick_track, root)
+    return {
+        "default": default.id if default else "",
+        "items": [
+            {
+                "id": track.id,
+                "name": track.name,
+                "category": track.category,
+                "bpm": track.bpm,
+                "bar": track.bar_seconds,
+                "author": track.author,
+            }
+            for track in tracks
+        ],
+    }
+
+
+@router.get(
+    "/product-library/bgm/{track_id}/stream",
+    response_class=FileResponse,
+    summary="Audition one background track",
+    description=(
+        "Streams a catalogue track to the signed-in account so the picker can be "
+        "auditioned in place. Range requests are honoured so the browser can seek. "
+        "The track is never offered as a downloadable file: it carries no "
+        "Content-Disposition and is never cached publicly, because the licence "
+        "covers use inside a finished video rather than redistribution."
+    ),
+)
+async def stream_bgm(
+    track_id: str,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> FileResponse:
+    root = server.services.paths.bgm_library_dir
+    track = await asyncio.to_thread(pick_track, root, track_id)
+    path = await asyncio.to_thread(track_path, root, track) if track else None
+    if path is None:
+        raise OctopError.localized(ErrorCode.NOT_FOUND)
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Accept-Ranges": "bytes",
+        },
+    )
 
 
 @router.get(
@@ -282,6 +381,19 @@ async def list_projects(
     return {"items": _service(server).list_projects(user.id)}
 
 
+@router.delete(
+    "/product-library/projects/{project_id}",
+    status_code=204,
+    summary="Delete one of my video projects",
+)
+async def delete_project(
+    project_id: str, user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> None:
+    _service(server).delete_project(user.id, project_id)
+    # Product assets stay because the snapshot only referenced them; the draft is ours.
+    await asyncio.to_thread(delete_draft, server.services.paths.root, user.id, project_id)
+
+
 @router.post(
     "/product-library/projects/{project_id}/prepare-render",
     response_model=PreparedResponse,
@@ -343,6 +455,10 @@ class StoryboardDraftBody(BaseModel):
     request: VideoPlanRequest
     script: dict[str, Any]
     confirmed: bool = False
+    narration_enabled: bool = False
+    narration_voice: str | None = None
+    bgm_id: str | None = None
+    bgm_enabled: bool = True
 
 
 @router.post(
@@ -363,8 +479,21 @@ async def generate_storyboard(
         raise HTTPException(
             status_code=502, detail="Video model unavailable or returned invalid script"
         ) from exc
+    # Regenerating the picture must not silently drop the audio settings the
+    # user already picked: they live beside the script, not inside it.
+    previous = await asyncio.to_thread(load_draft, server.services.paths.root, user.id, project_id)
     draft = await asyncio.to_thread(
-        save_draft, server.services.paths.root, user.id, project_id, snapshot, body, plan["script"]
+        save_draft,
+        server.services.paths.root,
+        user.id,
+        project_id,
+        snapshot,
+        body,
+        plan["script"],
+        narration_enabled=bool(previous.get("narration_enabled")) if previous else False,
+        narration_voice=(previous.get("narration_voice") or None) if previous else None,
+        bgm_id=(previous.get("bgm_id") or None) if previous else None,
+        bgm_enabled=bool(previous.get("bgm_enabled", True)) if previous else True,
     )
     return {"generator": plan["generator"], "draft": draft}
 
@@ -405,6 +534,10 @@ async def update_storyboard(
             body.request,
             body.script,
             confirmed=body.confirmed,
+            narration_enabled=body.narration_enabled,
+            narration_voice=resolve_voice_preset(body.narration_voice),
+            bgm_id=body.bgm_id,
+            bgm_enabled=body.bgm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -434,8 +567,35 @@ async def download_storyboard_package(
         )
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=422, detail="Saved storyboard is invalid") from exc
+    # Free tier: the desktop client synthesises the voice locally. Paid tier:
+    # the server renders the clips with MiniMax and ships them in the package.
+    premium = has_premium_narration(user)
+    narration_enabled = bool(draft.get("narration_enabled"))
+    voice_id = resolve_voice_preset(draft.get("narration_voice"))
+    voice_clips: dict[str, Path] | None = None
+    voice_durations: dict[str, float] | None = None
+    degraded = False
+    if premium and narration_enabled:
+        try:
+            voice_clips, voice_durations, degraded = await render_narration_clips(
+                manager=_voice_manager(server), script=script, voice_id=voice_id
+            )
+        except OctopError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.message) from exc
     package = await asyncio.to_thread(
-        export_project_package, server.services.paths, project, script_override=script
+        export_project_package,
+        server.services.paths,
+        project,
+        script_override=script,
+        narration_enabled=narration_enabled,
+        # Without usable clips the desktop client synthesises the voice itself.
+        premium=premium and bool(voice_clips),
+        voice_id=voice_id,
+        bgm_id=draft.get("bgm_id"),
+        bgm_enabled=bool(draft.get("bgm_enabled", True)),
+        voice_clips=voice_clips,
+        voice_durations=voice_durations,
+        narration_degraded=degraded,
     )
     return FileResponse(
         package,

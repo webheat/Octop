@@ -1,0 +1,64 @@
+name: Product Library MVP
+
+on:
+  push:
+    branches: [fix/backend-mvp-v01-integration]
+    paths:
+      - "dashboard/**"
+      - "src/octop/infra/product_library/**"
+      - "src/octop/api/routers/product_library.py"
+      - "tests/unit/db/test_product*.py"
+      - ".github/workflows/product-library-mvp.yml"
+      - "docs/design/product-library-mvp.md"
+  # 本仓库是 fork，GitHub 默认不为 fork 触发 push / schedule 事件，
+  # 因此 push 触发器在本仓库不会生效（mirror-to-cnb 工作流同理加了 pull_request）。
+  # PR 事件是本仓库唯一能自动触发工作流的入口。
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - "src/octop/infra/product_library/**"
+      - "src/octop/api/routers/product_library.py"
+      - "tests/unit/db/test_product*.py"
+      - ".github/workflows/product-library-mvp.yml"
+      - "docs/design/product-library-mvp.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-library-mvp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - name: Product library and wizard regression tests
+        run: npm test -- src/pages/ProductLibrary src/pages/ProductVideoWizard
+      - name: Type check and production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build
+
+  persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Ownership, persistence, immutable snapshots and package regression
+        run: uv run pytest -q tests/unit/db/test_product_library_repo.py tests/unit/db/test_product_package_export.py

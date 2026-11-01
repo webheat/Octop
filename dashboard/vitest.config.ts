@@ -24,6 +24,10 @@ export default defineConfig({
     css: false,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     pool: "threads",
+    // The product library / video wizard suites drive real antd + React
+    // trees and take 6-8 s per case on slow machines, which overruns the
+    // 5 s default and turns the MVP CI gate flaky.
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

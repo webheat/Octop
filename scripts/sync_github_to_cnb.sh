@@ -3,14 +3,14 @@
 #
 # 设计要点：
 #   1. 独立运行，不依赖 Claude。同步与校验全部由本脚本完成；
-#      只有在检测到异常时，才调用 claude 做初判，产出报告供人工介入。
+#      检测到异常就落盘，由人工判断，不做任何自动初判。
 #   2. 只做快进推送（不带 + / --force）。CNB 端若被直接改动导致分叉，
 #      推送会被拒绝 → 记为异常 → 交由人工判断，不自动覆盖。
 #   3. CNB 独有的分支（origin 上没有的）保留不动，只在报告里列出。
 #
 # 记录目录：<repo>/.git-sync/
 #   latest-report.md        最新一次运行报告（成功/失败都写）
-#   anomalies/<ts>.md       异常详情 + 大模型初判
+#   anomalies/<ts>.md       异常详情 + 待人工排查的方向
 #   cron.log                cron 的标准输出（由 cron 追加）
 #
 # 用法：
@@ -28,17 +28,6 @@ STATE_DIR="${STATE_DIR:-$REPO_DIR/.git-sync}"
 ANOMALY_DIR="$STATE_DIR/anomalies"
 REPORT="$STATE_DIR/latest-report.md"
 LOCK_FILE="$STATE_DIR/sync.lock"
-# claude CLI 随 nvm 切换版本，写死版本号路径会永远找不到（实测 v20.20.2 已不存在）。
-# 优先用 PATH 里的 claude，其次扫 nvm 版本目录取最高版本。
-if [ -z "${CLAUDE_BIN:-}" ]; then
-    if command -v claude >/dev/null 2>&1; then
-        CLAUDE_BIN="$(command -v claude)"
-    else
-        CLAUDE_BIN="$(ls -1d /root/.nvm/versions/node/*/bin/claude 2>/dev/null | sort -V | tail -1)"
-    fi
-fi
-CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
-TRIAGE_MODEL="${TRIAGE_MODEL:-sonnet}"
 
 mkdir -p "$STATE_DIR" "$ANOMALY_DIR"
 
@@ -267,55 +256,30 @@ fi
 
 log "报告已写入 $REPORT"
 
-# ---------- 6. 异常时调用大模型初判（best-effort，绝不影响同步结论） ----------
+# ---------- 6. 异常落盘，交人工判断 ----------
 if [ ${#ANOMALIES[@]} -gt 0 ]; then
     {
         echo
         echo "## 异常详情"
         echo
         for a in "${ANOMALIES[@]}"; do echo "- $a"; done
+        echo
+        echo "## 待人工判断"
+        echo
+        echo "本任务不再自动调用大模型初判（LLM 排查在 20 轮内无法收敛，只会产出误导性结论）。"
+        echo "排查方向（只读命令，人工执行）："
+        echo
+        echo '```'
+        echo "git -C $REPO_DIR ls-remote $CNB_REMOTE                 # CNB 端现有引用"
+        echo "git -C $REPO_DIR log --oneline $ORIGIN_REMOTE..$CNB_REMOTE  # CNB 端多出来的提交"
+        echo "git -C $REPO_DIR log --oneline $CNB_REMOTE..$ORIGIN_REMOTE  # origin 端多出来的提交"
+        echo '```'
+        echo
+        echo "常见根因：CNB 凭据过期 / CNB 端被直接改动导致分叉 / 网络问题 / 本地仓库状态异常。"
+        echo "确认无数据风险后，人工决定是否执行 git push --force-with-lease 覆盖。"
     } >>"$ANOMALY_FILE"
 
-    log "检测到 ${#ANOMALIES[@]} 项异常，调用大模型初判"
-    if [ -x "$CLAUDE_BIN" ]; then
-        PROMPT="你是 Git 仓库同步运维助手。仓库目录 $REPO_DIR，$ORIGIN_REMOTE 是 GitHub，$CNB_REMOTE 是 CNB。
-请阅读异常报告文件 $ANOMALY_FILE，并用 git log / git diff / git ls-remote 做只读排查，输出中文初判，包含：
-1) 根因判断（是 CNB 被直接改动、凭据失效、网络问题，还是本地仓库状态问题）；
-2) 影响范围（哪些分支/标签不一致，是否影响生产 main）；
-3) 建议的人工处理步骤（明确写出命令，但不要执行任何写操作、不要 push、不要 merge）；
-4) 是否可以安全地由人工执行 git push --force-with-lease 覆盖。
-"
-        TRIAGE_OUT="$(
-            cd "$REPO_DIR" && timeout "$CLAUDE_TIMEOUT" "$CLAUDE_BIN" -p \
-                --model "$TRIAGE_MODEL" \
-                --allowedTools "Read Grep Glob Bash(git:*)" \
-                --max-turns 20 \
-                "$PROMPT" 2>&1
-        )"
-        RC=$?
-        {
-            echo
-            echo "## 大模型初判（$(date '+%F %T')，exit=$RC）"
-            echo
-            echo '```text'
-            echo "$TRIAGE_OUT"
-            echo '```'
-        } >>"$ANOMALY_FILE"
-        if [ "$RC" -ne 0 ]; then
-            log "大模型初判未成功（exit=$RC），详见 $ANOMALY_FILE"
-        else
-            log "大模型初判已写入 $ANOMALY_FILE"
-        fi
-    else
-        {
-            echo
-            echo "## 大模型初判"
-            echo
-            echo "未找到可用的 claude CLI（$CLAUDE_BIN），跳过初判，请人工介入。"
-        } >>"$ANOMALY_FILE"
-        log "未找到 claude CLI，跳过初判"
-    fi
-    log "异常已记录：$ANOMALY_FILE"
+    log "检测到 ${#ANOMALIES[@]} 项异常，已记录待人工处理：$ANOMALY_FILE"
     exit 1
 fi
 

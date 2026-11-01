@@ -89,3 +89,71 @@ export function studioArgs({ cliEntry, entryPoint, projectDir, propsPath }) {
 export function propsDocument(script) {
   return JSON.stringify({ script });
 }
+
+export const AUDIO_PLAN_FILE = "audio.json";
+
+/**
+ * Read the optional audio plan that sits next to script.json.
+ *
+ * Keeping audio out of script.json is deliberate: the desktop client verifies
+ * the semantic hash of script.json against the confirmed plan, so the picture
+ * script must stay exactly what the user approved. Timing overrides and audio
+ * references travel separately and are merged in at load time.
+ */
+export function loadAudioPlan(root) {
+  const planPath = path.join(root, AUDIO_PLAN_FILE);
+  if (!fs.existsSync(planPath)) return null;
+  const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) fail("audio.json must contain a JSON object");
+  return plan;
+}
+
+function assetBasename(value, label) {
+  if (typeof value !== "string" || !value || /[\\/]/.test(value) || path.basename(value) !== value || value === "." || value === "..") {
+    fail(`${label} must be a basename`);
+  }
+  return value;
+}
+
+/**
+ * Apply an audio plan to a script without mutating the original.
+ *
+ * Scene durations are overridden to land on bar lines, and narration clips are
+ * attached only when the file is actually present — `mode: "local"` packages
+ * start without them and the desktop client fills them in before rendering.
+ */
+export function mergeAudioPlan(script, plan, root) {
+  if (!plan) return script;
+  const assetsRoot = path.join(root, "assets");
+  const present = (name) => {
+    const full = path.join(assetsRoot, name);
+    return fs.existsSync(full) && fs.statSync(full).isFile();
+  };
+  const merged = { ...script };
+  const audio = {};
+  if (plan.bgm && typeof plan.bgm === "object") {
+    const src = assetBasename(plan.bgm.src, "audio.bgm.src");
+    if (present(src)) audio.bgm = { ...plan.bgm, src };
+  }
+  if (plan.narration && typeof plan.narration === "object") {
+    audio.narration = { mode: "off", ...plan.narration };
+  }
+  if (Object.keys(audio).length > 0) merged.audio = audio;
+
+  const overrides = plan.scenes && typeof plan.scenes === "object" ? plan.scenes : {};
+  merged.scenes = script.scenes.map((scene) => {
+    const override = scene.id ? overrides[scene.id] : null;
+    if (!override || typeof override !== "object") return scene;
+    const next = { ...scene };
+    if (Number.isFinite(override.duration) && override.duration > 0) next.duration = override.duration;
+    if (typeof override.narration === "string" && override.narration) next.narration = override.narration;
+    if (override.audio && typeof override.audio === "object" && override.audio.src) {
+      const src = assetBasename(override.audio.src, `scene ${scene.id} audio src`);
+      if (present(src)) {
+        next.audio = { src, volume: Number.isFinite(override.audio.volume) ? override.audio.volume : 1 };
+      }
+    }
+    return next;
+  });
+  return merged;
+}

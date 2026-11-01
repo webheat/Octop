@@ -47,6 +47,58 @@ export interface Scene {
   bg?: string;
   /** Seconds the scene fades in / out. Default 0.4. */
   transition?: number;
+  /** Spoken line for this scene, read by the narration track. */
+  narration?: string;
+  /** Narration clip already present in the assets directory. */
+  audio?: SceneAudio;
+}
+
+export interface SceneAudio {
+  /** File name inside the assets directory. */
+  src: string;
+  /** Playback gain, 0..1. Default 1. */
+  volume?: number;
+}
+
+/** Background music bed. The file name points into the assets directory. */
+export interface BgmSpec {
+  src: string;
+  /** Gain while the track plays, 0..1. */
+  volume?: number;
+  /** Seconds of fade-in at the head of the video. */
+  fadeIn?: number;
+  /** Seconds of fade-out at the tail of the video. */
+  fadeOut?: number;
+  /** Gain multiplier applied while a scene is speaking (ducking). */
+  duck?: number;
+  /** Seconds to skip at the head of the track (long intros). */
+  offset?: number;
+  /** Bar length in seconds, for documentation and beat tooling. */
+  bar?: number;
+  bpm?: number;
+  title?: string;
+  /** Repeat the bed when the video outlasts the track. */
+  loop?: boolean;
+}
+
+/**
+ * How narration is produced.
+ *
+ * - `bundled` — the server already rendered the clips into `assets/`.
+ * - `local` — the desktop client synthesises them with the OS voice before
+ *   rendering (free tier); `assets/` starts without them.
+ * - `off` — no voice track.
+ */
+export interface NarrationSpec {
+  mode: "off" | "local" | "bundled";
+  voiceId?: string;
+  engine?: string;
+  source?: string;
+}
+
+export interface AudioPlan {
+  bgm?: BgmSpec;
+  narration?: NarrationSpec;
 }
 
 export interface VideoScript {
@@ -55,6 +107,7 @@ export interface VideoScript {
   width?: number;
   height?: number;
   theme?: Theme;
+  audio?: AudioPlan;
   scenes: Scene[];
 }
 

@@ -84,6 +84,24 @@ powershell -File scripts/wheel_build.ps1
 
 ---
 
+## 部署前端产物到服务器
+
+把 `src/octop/dashboard/` 的构建产物增量同步到线上（rsync + 远端备份 + 入口 hash 校验 + 探活）。
+**产物不入 git**，走「构建 → 同步」。
+
+| 平台 | 命令 |
+|------|------|
+| Windows (PowerShell) | `powershell -ExecutionPolicy Bypass -File scripts/deploy-dashboard.ps1` |
+| Git Bash / Linux / macOS | `bash scripts/deploy-dashboard.sh` |
+
+常用参数：`-DryRun` 先看差异、`-Build` 先构建、`-NoDelete` 不清旧文件、`-Restart` 重启服务。
+**不需要重启后端**，但客户端要硬刷新（Service Worker 缓存）。
+
+Windows 上有一批专属坑（脚本必须带 UTF-8 BOM、rsync 要配 MSYS ssh、私钥 ACL 校验等），
+详见 **[docs/windows-deploy-script.md](../docs/windows-deploy-script.md)**。
+
+---
+
 ## 平台说明
 
 - **macOS / Linux**：`install.sh` 支持自动安装 uv、创建 venv；Playwright Chromium 仅在 `--extras browser` 时下载（系统已有 Chrome 则跳过）。

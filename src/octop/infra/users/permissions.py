@@ -396,6 +396,18 @@ PERMISSIONS: dict[str, PermissionDef] = {
         page_zh="模型",
         page_en="Models",
     ),
+    # Paid tier: unlocks server-side MiniMax narration for product videos.
+    # The free tier falls back to the local Windows voice on the desktop
+    # client, so this only gates the premium voice, never the feature itself.
+    "voice_tts_premium": _p(
+        "voice_tts_premium",
+        "admin",
+        "付费配音",
+        "Premium narration",
+        page="models",
+        page_zh="模型",
+        page_en="Models",
+    ),
     "observability": _p(
         "observability",
         "admin",

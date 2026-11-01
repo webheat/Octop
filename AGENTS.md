@@ -379,6 +379,7 @@ Boundary rules are in [§5](#5-module-boundaries). Additionally:
 | OpenAPI tags and API intro | `api/openapi_meta.py` |
 | Human-readable API reference | `docs/api.md` |
 | Deployment pitfalls (path prefix, proxy, agent-running) | `docs/deployment-pitfalls.md` |
+| Windows deployment (PowerShell script, PS 5.1 quirks, SSH key ACL) | `docs/windows-deploy-script.md`; `scripts/deploy-dashboard.ps1` |
 | WeChat Open Platform login (开放平台网站应用扫码) | `docs/wechat-open-login.md` |
 | SharedServices / RepoBundle | `infra/db/services.py` |
 | Branching & release | [§10](#10-change-workflow) Branching & release; `CONTRIBUTING.md`; `.cursor/skills/publish` |

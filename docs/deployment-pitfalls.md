@@ -269,6 +269,22 @@ systemd 默认 5 次：连续重启几次就会彻底放弃启动，unit 卡在 
 
 ---
 
+## 11. Windows 上部署：PowerShell 脚本的坑单独成文
+
+在 **Windows 开发机**跑部署会遇到一批只在 Windows 出现的坑（UTF-8 BOM、原生命令 stderr
+被当异常、rsync 源路径冒号、rsync 必须配 MSYS ssh、MSYS ssh 的 HOME 退化、远端命令引号被吃），
+外加两个运维型事故：
+
+| 事故 | 一句话 |
+|------|--------|
+| `icacls /inheritance:r` 分步执行 | 第一步清空 DACL 后**第二步已无权写入** → 私钥变成谁都读不了，只能提权恢复 |
+| `Exceeded MaxStartups` | 短时间多次 ssh 打满未认证连接数；**别写重试循环**，越试越糟 |
+
+完整清单（含症状/原因/修法、事故复盘、脚本参数与执行流程）见
+**[windows-deploy-script.md](windows-deploy-script.md)**。
+
+---
+
 ## 相关文档
 
 | 文档 | 内容 |
@@ -276,3 +292,4 @@ systemd 默认 5 次：连续重启几次就会彻底放弃启动，unit 卡在 
 | [configuration.md](configuration.md) | `config.json` 全量键说明、`OCTOP_BASE_PATH`、挂前缀的完整配置 |
 | [remotion-video-pipeline.md](remotion-video-pipeline.md) | 视频生成流水线（服务器产出脚本 → 本机渲染 → 回传） |
 | [agent-backend-file-io.md](agent-backend-file-io.md) | 工作区存储后端（含 COS/S3/OBS） |
+| [windows-deploy-script.md](windows-deploy-script.md) | `deploy-dashboard.ps1` 用法 + Windows/PS 5.1 六个硬坑 + ACL 事故复盘 |

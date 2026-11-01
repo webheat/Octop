@@ -212,3 +212,13 @@ class ProductLibraryRepo:
                 ).fetchone(),
                 "project_id",
             )
+
+    def delete_project(self, owner_id: int, project_id: str) -> bool:
+        with self._db.transaction() as conn:
+            # Snapshot assets are references to the product's files, so removing a
+            # project must not touch storage shared with the product.
+            cur = conn.execute(
+                "DELETE FROM product_library_projects WHERE owner_user_id = ? AND project_id = ?",
+                (owner_id, project_id),
+            )
+        return bool(cur.rowcount > 0)

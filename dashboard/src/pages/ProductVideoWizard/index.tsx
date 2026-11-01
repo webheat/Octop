@@ -33,10 +33,12 @@ import {
   Upload as UploadIcon,
   X,
 } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   productLibraryApi,
+  type BgmOptions,
+  type NarrationOptions,
   type Product,
   type ProductAsset,
   type ProductProject,
@@ -150,6 +152,7 @@ function isNotFound(error: unknown) {
 export default function ProductVideoWizardPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const [params] = useSearchParams();
   const currentUser = useCurrentUser();
   const userId = currentUser?.id;
@@ -157,6 +160,15 @@ export default function ProductVideoWizardPage() {
   const isDesktop =
     desktopVideo.bridgeAvailable || window.octopDesktopVideo?.version === 1;
   const requestedProjectId = params.get("project");
+  const requestedProductId = params.get("product");
+  const routeSelection = location.state as { productId?: string; assetIds?: string[]; ownerId?: number | string } | null;
+  const hasOwnedRouteSelection = Boolean(
+    routeSelection &&
+      userId != null &&
+      routeSelection.productId &&
+      Array.isArray(routeSelection.assetIds) &&
+      String(routeSelection.ownerId) === String(userId),
+  );
   const [step, setStep] = useState(0);
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
@@ -180,17 +192,36 @@ export default function ProductVideoWizardPage() {
   const [previewRetry, setPreviewRetry] = useState(0);
   const [uploads, setUploads] = useState<File[]>([]);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [brief, setBrief] = useState<VideoBrief>({ ...EMPTY_VIDEO_BRIEF });
+  const [narrationOptions, setNarrationOptions] =
+    useState<NarrationOptions | null>(null);
+  const [narrationEnabled, setNarrationEnabled] = useState(false);
+  const [narrationVoice, setNarrationVoice] = useState("");
+  const [bgmOptions, setBgmOptions] = useState<BgmOptions | null>(null);
+  const [bgmEnabled, setBgmEnabled] = useState(true);
+  const [bgmId, setBgmId] = useState("");
+  // Auditioning is single-track on purpose: starting a second preview stops the
+  // first, so the wizard never plays two soundtracks over each other.
+  const [bgmPreview, setBgmPreview] = useState("");
+  const bgmPreviewRef = useRef<HTMLAudioElement | null>(null);
   const environmentSupported = desktopVideo.environmentSupported === true;
   const environmentStatus = desktopVideo.environmentStatus;
   const environmentReady =
     !environmentSupported || environmentStatus.state === "ready";
+  // Narration needs the desktop client: the browser cannot hand an audio file
+  // to the renderer, and the local voice only exists on Windows. When the
+  // account capabilities are still unknown the free tier is assumed, so the
+  // toggle stays usable instead of flickering.
+  const narrationAvailable = isDesktop;
   const environmentInstallerURL =
     desktopVideo.environmentInstallerURL &&
     /^https?:\/\//i.test(desktopVideo.environmentInstallerURL)
       ? desktopVideo.environmentInstallerURL
       : undefined;
   const urlsRef = useRef<Record<string, string>>({});
+  const uploadFileIds = useRef(new WeakMap<File, string>());
+  const nextUploadFileId = useRef(0);
   const requestVersion = useRef(0);
   const productIdRef = useRef<string | null>(null);
   const tRef = useRef(t);
@@ -205,9 +236,69 @@ export default function ProductVideoWizardPage() {
     environmentSupported,
   ]);
 
+  // Narration capabilities depend on the account tier, so they are fetched
+  // once and cached for the wizard session.
+  useEffect(() => {
+    let active = true;
+    void productLibraryApi
+      .narrationOptions()
+      .then((options) => {
+        if (active) setNarrationOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // The BGM catalogue is static per deployment, so one fetch per wizard visit
+  // is enough. An empty list simply hides the picker and the export keeps the
+  // server's default track.
+  useEffect(() => {
+    let active = true;
+    void productLibraryApi
+      .bgmOptions()
+      .then((options) => {
+        if (active) setBgmOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const cleanUrls = () => {
     Object.values(urlsRef.current).forEach(URL.revokeObjectURL);
     urlsRef.current = {};
+  };
+
+  // Leaving the wizard must not leave a soundtrack playing behind it.
+  useEffect(
+    () => () => {
+      bgmPreviewRef.current?.pause();
+      bgmPreviewRef.current = null;
+    },
+    [],
+  );
+
+  const toggleBgmPreview = (trackId: string) => {
+    const playing = bgmPreviewRef.current;
+    if (bgmPreview === trackId && playing) {
+      playing.pause();
+      bgmPreviewRef.current = null;
+      setBgmPreview("");
+      return;
+    }
+    playing?.pause();
+    const audio = new Audio(productLibraryApi.bgmStreamUrl(trackId));
+    audio.onended = () => setBgmPreview("");
+    audio.onerror = () => {
+      setBgmPreview("");
+      message.error(t("videoWizard.bgmPreviewFailed"));
+    };
+    bgmPreviewRef.current = audio;
+    setBgmPreview(trackId);
+    void audio.play().catch(() => setBgmPreview(""));
   };
 
   useEffect(() => {
@@ -226,6 +317,8 @@ export default function ProductVideoWizardPage() {
     setRequest({ ...initialRequest });
     setBrief({ ...EMPTY_VIDEO_BRIEF });
     setUploads([]);
+    setUploadBusy(false);
+    setUploadProgress("");
     setError("");
     setBusy(false);
     setNativeBusy(false);
@@ -255,6 +348,10 @@ export default function ProductVideoWizardPage() {
                 if (!active || version !== requestVersion.current) return;
                 setDraft(loaded);
                 setRequest(loaded.request);
+                setNarrationEnabled(loaded.narration_enabled === true);
+                setNarrationVoice(loaded.narration_voice || "");
+                setBgmEnabled(loaded.bgm_enabled !== false);
+                setBgmId(loaded.bgm_id || "");
                 const restoredBrief = decodeVideoBrief(
                   loaded.request.instructions,
                 );
@@ -278,6 +375,21 @@ export default function ProductVideoWizardPage() {
           } else {
             setError(tRef.current("videoWizard.unknownProject"));
           }
+        } else {
+          const routeProductId = hasOwnedRouteSelection
+            ? routeSelection?.productId
+            : requestedProductId;
+          const routedProduct = p.items.find((item) => item.id === routeProductId);
+          if (routedProduct) {
+            setProduct(routedProduct);
+            productIdRef.current = routedProduct.id;
+            setBrief({
+              ...EMPTY_VIDEO_BRIEF,
+              sellingPoints: routedProduct.selling_points.join("\n"),
+            });
+          } else if (routeProductId) {
+            setError(tRef.current("videoWizard.unknownProduct"));
+          }
         }
       })
       .catch(() => {
@@ -293,7 +405,11 @@ export default function ProductVideoWizardPage() {
       active = false;
       cleanUrls();
     };
-  }, [userId, requestedProjectId]);
+    // ``location.key`` is deliberately absent: it changes on every
+    // navigation, including the one that puts the freshly generated project
+    // into the URL. Depending on it would tear the whole wizard down and
+    // rebuild it right after the picture was generated.
+  }, [userId, requestedProjectId, requestedProductId]);
 
   useEffect(() => {
     if (!product || project) return;
@@ -310,13 +426,16 @@ export default function ProductVideoWizardPage() {
         if (!current) return;
         setAssetLoadFailed(false);
         setAssets(items);
+        const available = items.filter(
+          (asset) => asset.product_id === id && asset.active && asset.usage === "scene" && mediaType(asset),
+        );
+        const explicitIds = hasOwnedRouteSelection && routeSelection?.productId === id
+          ? routeSelection.assetIds
+          : undefined;
         setSelectedAssetIds(
-          items
-            .filter(
-              (asset) =>
-                asset.active && asset.usage === "scene" && mediaType(asset),
-            )
-            .map((asset) => asset.id),
+          explicitIds
+            ? available.filter((asset) => explicitIds.includes(asset.id)).map((asset) => asset.id)
+            : available.map((asset) => asset.id),
         );
       })
       .catch(() => {
@@ -328,7 +447,7 @@ export default function ProductVideoWizardPage() {
     return () => {
       current = false;
     };
-  }, [product?.id, project?.id, assetRetry]);
+  }, [product?.id, project?.id, assetRetry, hasOwnedRouteSelection, location.key]);
 
   const allSnapshotSceneAssets = useMemo(
     () =>
@@ -389,6 +508,9 @@ export default function ProductVideoWizardPage() {
     setProject(null);
     setDraft(null);
     setSaved(false);
+    setUploads([]);
+    setUploadBusy(false);
+    setUploadProgress("");
     setProduct(next);
     productIdRef.current = next?.id ?? null;
     setBrief({
@@ -491,29 +613,44 @@ export default function ProductVideoWizardPage() {
     if (!product || !uploads.length) return;
     const id = product.id;
     const version = requestVersion.current;
+    const batch = [...uploads];
+    const existingIds = new Set(assets.map((asset) => asset.id));
+    const uploadedIds: string[] = [];
+    let succeeded = 0;
     setUploadBusy(true);
+    setError("");
     try {
-      await productLibraryApi.upload(id, uploads, "scene");
-      if (productIdRef.current !== id || requestVersion.current !== version)
-        return;
-      const loaded = await productLibraryApi.assets(id);
-      if (productIdRef.current !== id || requestVersion.current !== version)
-        return;
-      setAssets(loaded.items);
-      setSelectedAssetIds(
-        loaded.items
-          .filter(
-            (asset) =>
-              asset.active && asset.usage === "scene" && mediaType(asset),
-          )
-          .map((asset) => asset.id),
-      );
-      setUploads([]);
-      message.success(t("videoWizard.uploaded"));
-    } catch {
-      setError(t("videoWizard.uploadFailed"));
+    for (const [index, file] of batch.entries()) {
+      if (productIdRef.current !== id || requestVersion.current !== version) break;
+      setUploadProgress(t("videoWizard.uploadProgress", { done: index, total: batch.length }));
+      try {
+        const result = await productLibraryApi.upload(id, [file], "scene");
+        if (productIdRef.current !== id || requestVersion.current !== version) break;
+        uploadedIds.push(...result.items.filter((asset) => !existingIds.has(asset.id) && asset.active && asset.usage === "scene" && mediaType(asset)).map((asset) => asset.id));
+        succeeded += 1;
+        setUploads((current) => current.filter((item) => item !== file));
+      } catch {
+        // Keep failed entries in the queue for an explicit retry.
+      }
+    }
+    if (productIdRef.current === id && requestVersion.current === version) {
+      try {
+        const loaded = await productLibraryApi.assets(id);
+        if (productIdRef.current !== id || requestVersion.current !== version) return;
+        setAssets(loaded.items);
+        const valid = new Set(loaded.items.filter((asset) => asset.active && asset.usage === "scene" && mediaType(asset)).map((asset) => asset.id));
+        setSelectedAssetIds((current) => [...new Set([...current.filter((assetId) => valid.has(assetId)), ...uploadedIds.filter((assetId) => valid.has(assetId))])]);
+        if (succeeded) message.success(t("videoWizard.uploadedCount", { count: succeeded }));
+        if (batch.length > succeeded) setError(t("videoWizard.uploadFailedCount", { count: batch.length - succeeded }));
+      } catch {
+        if (productIdRef.current === id && requestVersion.current === version) setError(t("videoWizard.uploadFailed"));
+      }
+    }
     } finally {
-      setUploadBusy(false);
+      if (productIdRef.current === id && requestVersion.current === version) {
+        setUploadBusy(false);
+        setUploadProgress("");
+      }
     }
   };
 
@@ -576,6 +713,8 @@ export default function ProductVideoWizardPage() {
       if (version !== requestVersion.current) return;
       setRequest(planRequest);
       setDraft(result.draft);
+      // The narration settings live beside the script, so regenerating the
+      // picture leaves them alone; keep the local copy as the source of truth.
       setSaved(true);
       setStep(3);
       navigate(
@@ -629,6 +768,10 @@ export default function ProductVideoWizardPage() {
         request: saveRequest,
         script: draft.script,
         confirmed,
+        narration_enabled: narrationEnabled,
+        narration_voice: narrationVoice,
+        bgm_enabled: bgmEnabled,
+        bgm_id: bgmId || undefined,
       });
       if (version !== requestVersion.current) return;
       setDraft(updated);
@@ -1095,21 +1238,27 @@ export default function ProductVideoWizardPage() {
                         <Space wrap>
                           <Upload
                             multiple
-                            accept="image/*,video/*"
+                            accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.avif,.mp4,.webm,.mov,.m4v"
                             beforeUpload={(file) => {
+                              if (!/\.(png|jpe?g|gif|webp|bmp|avif|mp4|webm|mov|m4v)$/i.test(file.name)) {
+                                setError(t("videoWizard.unsupportedMedia"));
+                                return Upload.LIST_IGNORE;
+                              }
                               setUploads((list) => [...list, file]);
                               return false;
                             }}
-                            fileList={uploads.map((file, i) => ({
-                              uid: `${i}-${file.name}`,
+                            fileList={uploads.map((file) => ({
+                              uid: (() => {
+                                let id = uploadFileIds.current.get(file);
+                                if (!id) { id = `wizard-upload-${nextUploadFileId.current++}`; uploadFileIds.current.set(file, id); }
+                                return id;
+                              })(),
                               name: file.name,
                               status: "done" as const,
                             }))}
                             onRemove={(file) => {
                               setUploads((list) =>
-                                list.filter(
-                                  (_, i) => !file.uid.startsWith(`${i}-`),
-                                ),
+                                list.filter((item) => uploadFileIds.current.get(item) !== file.uid),
                               );
                               return true;
                             }}
@@ -1121,6 +1270,8 @@ export default function ProductVideoWizardPage() {
                               {t("videoWizard.addAssets")}
                             </Button>
                           </Upload>
+                          {uploadProgress && <Typography.Text>{uploadProgress}</Typography.Text>}
+                          <Typography.Text type="secondary">{t("videoWizard.supportedFormats")}</Typography.Text>
                           {!!uploads.length && (
                             <Button
                               loading={uploadBusy}
@@ -1364,6 +1515,125 @@ export default function ProductVideoWizardPage() {
                     >
                       {t("videoWizard.includeSellingPoints")}
                     </Checkbox>
+                    <div className={styles.narrationRow}>
+                      <Checkbox
+                        checked={narrationEnabled}
+                        disabled={busy || !narrationAvailable}
+                        onChange={(e) => {
+                          setNarrationEnabled(e.target.checked);
+                          setSaved(false);
+                          setDraft((current) =>
+                            current ? { ...current, confirmed: false } : current,
+                          );
+                        }}
+                      >
+                        {t("videoWizard.narration")}
+                      </Checkbox>
+                      {narrationEnabled && narrationOptions?.voices.length ? (
+                        <Select
+                          size="small"
+                          aria-label={t("videoWizard.narrationVoice")}
+                          value={narrationVoice || undefined}
+                          onChange={(value) => {
+                            setNarrationVoice(value ?? "");
+                            setSaved(false);
+                            setDraft((current) =>
+                              current
+                                ? { ...current, confirmed: false }
+                                : current,
+                            );
+                          }}
+                          placeholder={t("videoWizard.narrationVoice")}
+                          options={narrationOptions.voices.map((voice) => ({
+                            value: voice.id,
+                            label: voice.label,
+                          }))}
+                        />
+                      ) : null}
+                      {narrationEnabled && !narrationOptions?.premium ? (
+                        <span className={styles.narrationHint}>
+                          {t("videoWizard.narrationLocalHint")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className={styles.narrationRow}>
+                      <Checkbox
+                        checked={bgmEnabled}
+                        disabled={busy}
+                        onChange={(e) => {
+                          setBgmEnabled(e.target.checked);
+                          if (!e.target.checked) {
+                            bgmPreviewRef.current?.pause();
+                            bgmPreviewRef.current = null;
+                            setBgmPreview("");
+                          }
+                          setSaved(false);
+                          setDraft((current) =>
+                            current ? { ...current, confirmed: false } : current,
+                          );
+                        }}
+                      >
+                        {t("videoWizard.bgm")}
+                      </Checkbox>
+                      {bgmEnabled && bgmOptions?.items.length ? (
+                        <>
+                          <Select
+                            size="small"
+                            showSearch
+                            optionFilterProp="label"
+                            aria-label={t("videoWizard.bgmTrack")}
+                            value={bgmId || bgmOptions.default || undefined}
+                            onChange={(value) => {
+                              setBgmId(value ?? "");
+                              setSaved(false);
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, confirmed: false }
+                                  : current,
+                              );
+                            }}
+                            placeholder={t("videoWizard.bgmTrack")}
+                            options={bgmOptions.items.map((track) => ({
+                              value: track.id,
+                              label: track.bpm
+                                ? `${track.name} · ${Math.round(track.bpm)} BPM`
+                                : track.name,
+                            }))}
+                          />
+                          {(() => {
+                            const current =
+                              bgmId || bgmOptions.default || "";
+                            if (!current) return null;
+                            const playing = bgmPreview === current;
+                            return (
+                              <Button
+                                size="small"
+                                type="text"
+                                disabled={busy}
+                                aria-label={
+                                  playing
+                                    ? t("videoWizard.bgmPreviewStop")
+                                    : t("videoWizard.bgmPreview")
+                                }
+                                title={
+                                  playing
+                                    ? t("videoWizard.bgmPreviewStop")
+                                    : t("videoWizard.bgmPreview")
+                                }
+                                icon={
+                                  playing ? (
+                                    <X size={14} />
+                                  ) : (
+                                    <Play size={14} />
+                                  )
+                                }
+                                onClick={() => toggleBgmPreview(current)}
+                              />
+                            );
+                          })()}
+                        </>
+                      ) : null}
+                    </div>
                     <Input.TextArea
                       className={styles.sellingPoints}
                       rows={3}

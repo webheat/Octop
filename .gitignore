@@ -127,3 +127,6 @@ remotion/example/out/
 
 # GitHub → CNB 镜像同步脚本的运行状态（报告 / 锁 / 异常归档）
 .git-sync/
+
+# WorkBuddy 项目数据（artifacts 交付包 / memory / seed），不入仓库
+.workbuddy/

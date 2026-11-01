@@ -465,6 +465,7 @@
     "VOICE_CAPABILITY_MISMATCH": "语音能力不匹配。",
     "VOICE_PROVIDER_DISABLED": "语音提供商已禁用。",
     "VOICE_REALTIME_UNAVAILABLE": "实时语音识别不可用，请检查腾讯云语音配置。",
+    "VOICE_PROVIDER_ERROR": "语音服务出错，请稍后重试。",
     "INTERNAL_ERROR": "服务器内部错误。",
     "TLS_NOT_ELIGIBLE": "当前服务器配置不支持 TLS 证书申请。",
     "TLS_ISSUE_IN_PROGRESS": "已有证书申请任务正在进行。",

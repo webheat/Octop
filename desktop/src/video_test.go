@@ -450,3 +450,34 @@ func TestVideoRealRuntimeSmoke(t *testing.T) {
 	}
 	t.Fatal("native runtime smoke timed out after 120 seconds")
 }
+
+// TestVideoPackageKeepsAudioPlan proves the optional audio.json survives the
+// extraction: the client needs it to synthesise the free-tier narration.
+func TestVideoPackageKeepsAudioPlan(t *testing.T) {
+	buf := new(strings.Builder)
+	zw := zip.NewWriter(writerAdapter{buf})
+	script := []byte(`{"title":"Camera","scenes":[{"id":"s1","type":"title","duration":2}]}`)
+	sum := sha256.Sum256(script)
+	w, _ := zw.Create("script.json")
+	_, _ = w.Write(script)
+	w, _ = zw.Create("manifest.json")
+	_, _ = w.Write([]byte(`{"schema":"octop-remotion-package/1","template_version":"1","project_id":"p","script_sha256":"` + hex.EncodeToString(sum[:]) + `","assets":[]}`))
+	w, _ = zw.Create("audio.json")
+	_, _ = w.Write([]byte(`{"narration":{"mode":"local"},"scenes":{"s1":{"narration":"hi"}}}`))
+	_ = zw.Close()
+	p := filepath.Join(t.TempDir(), "x.zip")
+	if err := os.WriteFile(p, []byte(buf.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "data")
+	if _, err := extractVideoPackage(p, dest, "p"); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	plan, err := os.ReadFile(filepath.Join(dest, "audio.json"))
+	if err != nil {
+		t.Fatalf("audio.json was not extracted: %v", err)
+	}
+	if !strings.Contains(string(plan), `"mode":"local"`) {
+		t.Fatalf("unexpected audio plan: %s", plan)
+	}
+}

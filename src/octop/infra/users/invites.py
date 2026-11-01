@@ -230,6 +230,9 @@ class InviteService:
             action="invite.redeem",
             target=cleaned_code,
         )
+        from octop.infra.product_library.starter import seed_quietly
+
+        seed_quietly(self._services, user_id)
         return user
 
 

@@ -184,6 +184,9 @@ class UserManager:
             )
             self._users[username] = user
             self._services.audit_repo.write(actor=username, action="user.create", target=username)
+            from octop.infra.product_library.starter import seed_quietly_async
+
+            await seed_quietly_async(self._services, uid)
             return user
 
     def register_cached_user(self, user: User) -> None:
@@ -303,6 +306,9 @@ class UserManager:
                         self._services.audit_repo.write(
                             actor=username, action="user.sso_create", target=username
                         )
+                        from octop.infra.product_library.starter import seed_quietly_async
+
+                        await seed_quietly_async(self._services, uid)
                         return user
 
             assert row is not None  # The retry loop either returns, raises, or finds this identity.

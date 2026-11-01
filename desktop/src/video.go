@@ -55,6 +55,29 @@ type videoScript struct {
 		Asset string `json:"asset"`
 	} `json:"scenes"`
 }
+
+// audioPlan mirrors the optional audio.json that ships beside script.json.
+//
+// It is kept separate from the script on purpose: the script hash the server
+// confirmed must not change, so timing overrides and track references travel
+// in their own file.
+type audioPlan struct {
+	BGM struct {
+		Src string  `json:"src"`
+		Bar float64 `json:"bar"`
+	} `json:"bgm"`
+	Narration struct {
+		Mode    string `json:"mode"`
+		VoiceID string `json:"voiceId"`
+	} `json:"narration"`
+	Scenes map[string]struct {
+		Duration  float64 `json:"duration"`
+		Narration string  `json:"narration"`
+		Audio     struct {
+			Src string `json:"src"`
+		} `json:"audio"`
+	} `json:"scenes"`
+}
 type runtimeManifest struct {
 	Schema          string `json:"schema"`
 	TemplateVersion int    `json:"templateVersion"`
@@ -496,6 +519,10 @@ func (m *videoManager) run(rec *videoJobRecord, token string) {
 		m.fail(rec, "PLAN_CHANGED")
 		return
 	}
+	// The free tier receives narration lines without audio; synthesise them
+	// locally before the renderer starts. Failures are not fatal — the video
+	// still renders, just without the voice.
+	_ = synthesizeLocalNarration(dataDir)
 	rec.DataDir = dataDir
 	rec.Job.Name = meta
 	m.mu.Lock()
@@ -617,7 +644,7 @@ func extractVideoPackage(zipPath, dest, project string) (string, error) {
 		}
 	}
 	for name, f := range entries {
-		if name != "script.json" && name != "manifest.json" && !strings.HasPrefix(name, "assets/") {
+		if name != "script.json" && name != "manifest.json" && name != "audio.json" && !strings.HasPrefix(name, "assets/") {
 			continue
 		}
 		if strings.HasPrefix(name, "assets/") {

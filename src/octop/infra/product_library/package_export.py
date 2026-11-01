@@ -10,6 +10,9 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.product_library.audio import (
+    build_package_audio,
+)
 from octop.infra.product_library.service import project_payload, render_script
 from octop.infra.utils.paths import PathLayout
 
@@ -30,6 +33,9 @@ TEMPLATE_FILES = (
     "src/scenes/SceneFrame.tsx",
 )
 LAUNCHERS = ("preview.cmd", "preview.command", "render.cmd", "render.command")
+#: Audio travels next to script.json, never inside it: the desktop client
+#: verifies the semantic hash of script.json against the confirmed plan.
+AUDIO_PLAN_FILE = "audio.json"
 PACKAGE_README = """Octop 视频制作包 / Local video package
 
 1. 安装 Node.js 22 或更新版本：https://nodejs.org/
@@ -80,7 +86,18 @@ def _write_text(archive: ZipFile, name: str, content: bytes, *, executable: bool
 
 
 def export_project_package(
-    paths: PathLayout, project: dict[str, Any], *, script_override: dict[str, Any] | None = None
+    paths: PathLayout,
+    project: dict[str, Any],
+    *,
+    script_override: dict[str, Any] | None = None,
+    narration_enabled: bool = False,
+    premium: bool = False,
+    voice_id: str | None = None,
+    bgm_id: str | None = None,
+    bgm_enabled: bool = True,
+    voice_clips: dict[str, Path] | None = None,
+    voice_durations: dict[str, float] | None = None,
+    narration_degraded: bool = False,
 ) -> Path:
     """Return a temporary ZIP; the HTTP adapter removes it after transmission."""
     snapshot = project_payload(project)["snapshot"]
@@ -110,6 +127,37 @@ def export_project_package(
             {"path": archive_path, "sha256": asset["content_hash"], "bytes": source.stat().st_size}
         )
 
+    # Audio lives beside script.json so the picture script keeps the exact
+    # bytes the user confirmed; the client verifies that hash separately.
+    audio = build_package_audio(
+        paths.bgm_library_dir,
+        script,
+        narration_enabled=narration_enabled,
+        premium=premium,
+        voice_id=voice_id,
+        bgm_id=bgm_id,
+        bgm_enabled=bgm_enabled,
+        voice_clips=voice_clips,
+        voice_durations=voice_durations,
+        degraded=narration_degraded,
+    )
+    if audio is not None:
+        for name, source in audio.files:
+            resolved = source.resolve()
+            if not resolved.is_file():
+                raise OctopError.localized(ErrorCode.NOT_FOUND)
+            archive_path = f"assets/{name}"
+            if any(entry[0] == archive_path for entry in sources):
+                continue
+            sources.append((archive_path, resolved))
+            manifest_assets.append(
+                {
+                    "path": archive_path,
+                    "sha256": file_sha256(resolved),
+                    "bytes": resolved.stat().st_size,
+                }
+            )
+
     renderer = template_root()
     for filename in (*TEMPLATE_FILES, *(f"launchers/{name}" for name in LAUNCHERS)):
         if not (renderer / filename).is_file():
@@ -130,6 +178,12 @@ def export_project_package(
         with ZipFile(output, "w", allowZip64=True) as archive:
             archive.writestr("assets/", b"")
             _write_text(archive, "script.json", script_bytes)
+            if audio is not None:
+                _write_text(
+                    archive,
+                    AUDIO_PLAN_FILE,
+                    json.dumps(audio.plan, ensure_ascii=False, indent=2).encode(),
+                )
             _write_text(
                 archive,
                 "manifest.json",

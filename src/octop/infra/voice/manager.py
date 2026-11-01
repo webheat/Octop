@@ -215,6 +215,14 @@ class VoiceManager:
             async for chunk in adapters.synthesize_mimo(row, text, voice_id=voice_id, speed=speed):
                 yield chunk
             return
+        if kind == "minimax":
+            if row is None:
+                raise OctopError(ErrorCode.NOT_FOUND, "MiniMax voice provider is not configured")
+            async for chunk in adapters.synthesize_minimax(
+                row, text, voice_id=voice_id, speed=speed
+            ):
+                yield chunk
+            return
         raise OctopError(ErrorCode.VOICE_KIND_UNSUPPORTED, f"unsupported TTS kind {kind!r}")
 
     async def test_provider(

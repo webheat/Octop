@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "octop"
-version = "1.2.0"
+version = "1.4.0"
 description = "Smarter self-hosted AI assistant for multiple users and agents, built on octop-harness"
 readme = "README.md"
 license = { text = "MIT" }
@@ -131,6 +131,7 @@ include = [
     "src/octop/**/*.sql",
     "src/octop/**/*.sh",
     "src/octop/**/*.png",
+    "src/octop/**/*.jpg",
     "src/octop/dashboard/**/*",
     "src/octop/infra/agents/experts/library/**/*",
     "src/octop/infra/agents/plugins/bundled/**/*",

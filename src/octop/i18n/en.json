@@ -465,6 +465,7 @@
     "VOICE_CAPABILITY_MISMATCH": "Voice capability does not match.",
     "VOICE_PROVIDER_DISABLED": "Voice provider is disabled.",
     "VOICE_REALTIME_UNAVAILABLE": "Realtime speech recognition is unavailable. Check the Tencent Cloud voice settings.",
+    "VOICE_PROVIDER_ERROR": "The speech service failed. Please try again later.",
     "INTERNAL_ERROR": "Internal server error.",
     "TLS_NOT_ELIGIBLE": "TLS issuance is not available in the current server configuration.",
     "TLS_ISSUE_IN_PROGRESS": "A certificate issuance task is already running.",

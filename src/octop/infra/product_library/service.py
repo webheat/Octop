@@ -245,6 +245,10 @@ class ProductLibraryService:
             raise OctopError.localized(ErrorCode.NOT_FOUND)
         return row
 
+    def delete_project(self, owner_id: int, project_id: str) -> None:
+        if not self.repo.delete_project(owner_id, project_id):
+            raise OctopError.localized(ErrorCode.NOT_FOUND)
+
     def store_asset(
         self,
         *,

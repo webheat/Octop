@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   generateStoryboard: vi.fn(),
   getStoryboard: vi.fn(),
   saveStoryboard: vi.fn(),
+  narrationOptions: vi.fn(),
   downloadStoryboardPackage: vi.fn(),
   downloadAsset: vi.fn(),
 }));
@@ -177,9 +178,12 @@ const savedDraft = {
   confirmed: false,
 };
 
-function renderWizard(path = "/product-library/video-wizard") {
+function renderWizard(
+  path = "/product-library/video-wizard",
+  state?: unknown,
+) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[{ pathname: path.split("?")[0], search: path.includes("?") ? `?${path.split("?")[1]}` : "", state }]}>
       <Routes>
         <Route
           path="/product-library/video-wizard"
@@ -206,6 +210,11 @@ describe("product video wizard", () => {
     api.products.mockResolvedValue({ items: [product] });
     api.projects.mockResolvedValue({ items: [] });
     api.assets.mockResolvedValue({ items: [sceneAsset] });
+    api.narrationOptions.mockResolvedValue({
+      premium: false,
+      modes: ["off", "local"],
+      voices: [],
+    });
     api.downloadAsset.mockResolvedValue(new Blob(["image"]));
     api.createProject.mockResolvedValue(project);
     api.updateProduct.mockImplementation(async (_id, body) => ({
@@ -366,6 +375,81 @@ describe("product video wizard", () => {
     expect(desktopJobs.start).toHaveBeenCalledTimes(1);
   });
 
+  it("uses only available assets from the same product in route selection, including an explicit empty selection", async () => {
+    api.assets.mockResolvedValue({ items: [sceneAsset, foreignAsset, { ...sceneAsset, id: "disabled", active: 0 }, { ...sceneAsset, id: "reference", usage: "reference" }] });
+    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset1", "asset2", "disabled", "reference"], ownerId: 7 });
+    await screen.findByText("front.jpg");
+    expect(screen.getAllByRole("checkbox")[0]).toBeChecked();
+    expect(screen.queryByText("foreign.jpg")).not.toBeInTheDocument();
+    cleanup();
+    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: [], ownerId: 7 });
+    await screen.findByText("front.jpg");
+    expect(screen.getAllByRole("checkbox")[0]).not.toBeChecked();
+  });
+
+  it("does not inherit another owner's route selection and gives an existing project precedence", async () => {
+    const secondAsset = { ...sceneAsset, id: "asset2", filename: "side.jpg" };
+    api.assets.mockResolvedValue({ items: [sceneAsset, secondAsset] });
+    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset2"], ownerId: 6 });
+    await screen.findByText("side.jpg");
+    expect(screen.getAllByRole("checkbox")[0]).toBeChecked();
+    expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
+
+    cleanup();
+    api.projects.mockResolvedValue({ items: [project] });
+    api.getStoryboard.mockResolvedValue(savedDraft);
+    renderWizard("/product-library/video-wizard?project=project1&product=p1", { productId: "p1", assetIds: [], ownerId: 7 });
+    await waitFor(() => expect(api.getStoryboard).toHaveBeenCalledWith("project1"));
+  });
+
+  it("ignores a late asset response after switching products", async () => {
+    const user = userEvent.setup();
+    const secondProduct = { ...product, id: "p2", name: "Second product" };
+    let resolveFirst!: (value: { items: typeof sceneAsset[] }) => void;
+    let resolveSecond!: (value: { items: typeof sceneAsset[] }) => void;
+    api.products.mockResolvedValue({ items: [product, secondProduct] });
+    api.assets.mockImplementation((id: string) => new Promise((resolve) => {
+      if (id === "p1") resolveFirst = resolve;
+      else resolveSecond = resolve;
+    }));
+    renderWizard();
+    await screen.findByText("videoWizard.chooseTitle");
+    const selector = screen.getByRole("combobox", { name: "videoWizard.product" });
+    await user.selectOptions(selector, "p1");
+    await user.selectOptions(selector, "p2");
+    await act(async () => resolveFirst({ items: [sceneAsset] }));
+    const secondAsset = { ...sceneAsset, id: "p2-asset", product_id: "p2", filename: "second.jpg" };
+    await act(async () => resolveSecond({ items: [secondAsset] }));
+    await screen.findByText("second.jpg");
+    expect(screen.queryByText("front.jpg")).not.toBeInTheDocument();
+  });
+
+  it("keeps a cancelled old selection while retaining and retrying only failed uploads", async () => {
+    const user = userEvent.setup();
+    const added = { ...sceneAsset, id: "asset-new", filename: "new.jpg" };
+    const failedFile = new File(["bad"], "failed.jpg", { type: "image/jpeg" });
+    const goodFile = new File(["good"], "new.jpg", { type: "image/jpeg" });
+    api.upload.mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ items: [added] })
+      .mockResolvedValueOnce({ items: [{ ...sceneAsset, id: "asset-retry", filename: "failed.jpg" }] });
+    api.assets.mockResolvedValueOnce({ items: [sceneAsset] })
+      .mockResolvedValueOnce({ items: [sceneAsset, added] })
+      .mockResolvedValue({ items: [sceneAsset, added, { ...sceneAsset, id: "asset-retry", filename: "failed.jpg" }] });
+    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset1"], ownerId: 7 });
+    await screen.findByText("front.jpg");
+    await user.click(screen.getByText("front.jpg").closest("button")!);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [failedFile, goodFile]);
+    await user.click(screen.getByRole("button", { name: "videoWizard.uploadAssets" }));
+    await screen.findByText("new.jpg");
+    expect(screen.getAllByRole("checkbox")[0]).not.toBeChecked();
+    expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
+    expect(screen.getByText("failed.jpg")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "videoWizard.uploadAssets" }));
+    await waitFor(() => expect(api.upload).toHaveBeenCalledTimes(3));
+    expect(screen.getByText("failed.jpg")).toBeInTheDocument();
+  });
+
   it("restores structured requirements and replaces the platform selection", async () => {
     const user = userEvent.setup();
     const instructions = encodeVideoBrief({
@@ -494,5 +578,102 @@ describe("product video wizard", () => {
     );
     expect(installer).toHaveAttribute("target", "_blank");
     expect(desktopJobs.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps narration unavailable outside the desktop client", async () => {
+    const user = userEvent.setup();
+    api.projects.mockResolvedValue({ items: [project] });
+    api.getStoryboard.mockResolvedValue(savedDraft);
+    api.narrationOptions.mockResolvedValue({
+      premium: true,
+      modes: ["off", "local", "bundled"],
+      voices: [{ id: "female-shaonv", label: "少女音" }],
+    });
+    renderWizard("/product-library/video-wizard?project=project1");
+    await screen.findByText("videoWizard.storyboardTitle");
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.previous" }),
+    );
+    await screen.findByText("videoWizard.requirementsTitle");
+    expect(
+      screen.getByRole("checkbox", { name: "videoWizard.narration" }),
+    ).toBeDisabled();
+  });
+
+  it("saves the narration choice and the picked premium voice", async () => {
+    const user = userEvent.setup();
+    api.projects.mockResolvedValue({ items: [project] });
+    // The server keeps the audio settings when the picture is regenerated,
+    // so a reload returns whatever was last saved.
+    let stored: typeof savedDraft = { ...savedDraft };
+    api.getStoryboard.mockImplementation(async () => stored);
+    api.saveStoryboard.mockImplementation(async (_id, body) => {
+      stored = { ...stored, ...body };
+      return stored;
+    });
+    api.narrationOptions.mockResolvedValue({
+      premium: true,
+      modes: ["off", "local", "bundled"],
+      voices: [{ id: "female-shaonv", label: "少女音" }],
+    });
+    desktopJobs.bridgeAvailable = true;
+    renderWizard("/product-library/video-wizard?project=project1");
+    await screen.findByText("videoWizard.storyboardTitle");
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.previous" }),
+    );
+    const toggle = await screen.findByRole("checkbox", {
+      name: "videoWizard.narration",
+    });
+    // The toggle unlocks once the account's capabilities arrive.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "videoWizard.narration" }),
+      ).not.toBeDisabled(),
+    );
+    // Narration starts off; the user turns it on.
+    await user.click(
+      screen.getByRole("checkbox", { name: "videoWizard.narration" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "videoWizard.narration" }),
+      ).toBeChecked(),
+    );
+    // A paid account may pick one of the server-side voices.
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "videoWizard.narrationVoice" }),
+      "female-shaonv",
+    );
+    // Regenerating the picture keeps the audio settings.
+    api.generateStoryboard.mockImplementation(async () => {
+      // A slow machine answers well after the click. The wizard must keep
+      // the picture it just produced instead of reloading the whole page.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const draft = {
+        ...stored,
+        narration_enabled: true,
+        narration_voice: "female-shaonv",
+      };
+      stored = draft;
+      return { generator: "llm", draft };
+    });
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.generate" }),
+    );
+    await waitFor(() => expect(api.generateStoryboard).toHaveBeenCalled());
+    // The confirm button stays disabled while the regeneration is in flight.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "videoWizard.confirmMake" }),
+      ).not.toBeDisabled(),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.confirmMake" }),
+    );
+    await waitFor(() => expect(api.saveStoryboard).toHaveBeenCalled());
+    const body = api.saveStoryboard.mock.calls.at(-1)?.[1];
+    expect(body.narration_enabled).toBe(true);
+    expect(body.narration_voice).toBe("female-shaonv");
   });
 });

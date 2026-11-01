@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { propsDocument, studioArgs, validatePackage } from "./project.mjs";
+import { loadAudioPlan, mergeAudioPlan, propsDocument, studioArgs, validatePackage } from "./project.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -66,6 +66,10 @@ export function installState(rendererDir) {
 
 export function plan(options) {
   const { root, script } = validatePackage(options.project);
+  // Studio previews the same picture the renderer will produce, so the audio
+  // plan has to be merged here as well.
+  const audioPlan = loadAudioPlan(root);
+  const mergedScript = mergeAudioPlan(script, audioPlan, root);
   const rendererDir = HERE;
   const { npmInstall, markerPath, lockHash } = installState(rendererDir);
   if (options.render) {
@@ -73,11 +77,11 @@ export function plan(options) {
     if (options.quality) args.push("--quality", options.quality);
     return { mode: "render", root, rendererDir, npmInstall, markerPath, lockHash, command: process.execPath, args };
   }
-  if (npmInstall) return { mode: "preview", root, rendererDir, npmInstall, markerPath, lockHash, script };
+  if (npmInstall) return { mode: "preview", root, rendererDir, npmInstall, markerPath, lockHash, script: mergedScript };
   const cliEntry = resolveCliEntry();
   const propsPath = path.join(os.tmpdir(), `octop-remotion-props-${process.pid}.json`);
   const command = studioArgs({ cliEntry, entryPoint: path.join(rendererDir, "src", "index.ts"), projectDir: root, propsPath });
-  return { mode: "preview", root, rendererDir, npmInstall, markerPath, lockHash, script, propsPath, ...command };
+  return { mode: "preview", root, rendererDir, npmInstall, markerPath, lockHash, script: mergedScript, propsPath, ...command };
 }
 
 function spawnNpmCi(cwd) {
