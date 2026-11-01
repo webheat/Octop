@@ -40,7 +40,13 @@ main:
         - name: install deps
           script: |
             uv pip install --system -e ".[dev]"
+            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
+            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
+            # 变成红点，跟提交本身无关。要升级就两边一起升。
+            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
             python -c "import fastapi, pytest; print('deps ok')"
+            ruff --version
+            mypy --version
         - name: lint
           script: |
             ruff check src tests
@@ -82,7 +88,13 @@ main:
         - name: install deps
           script: |
             uv pip install --system -e ".[dev]"
+            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
+            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
+            # 变成红点，跟提交本身无关。要升级就两边一起升。
+            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
             python -c "import fastapi, pytest; print('deps ok')"
+            ruff --version
+            mypy --version
         - name: lint
           script: |
             ruff check src tests
@@ -144,7 +156,13 @@ $:
         - name: install deps
           script: |
             uv pip install --system -e ".[dev]"
+            # 质量门禁工具钉到与本机一致的版本：pyproject 里是 ruff>=0.4 /
+            # mypy>=1.10 的浮动约束，CI 每次拉最新版会把"新版本新增的检查"
+            # 变成红点，跟提交本身无关。要升级就两边一起升。
+            uv pip install --system "ruff==0.15.20" "mypy==2.1.0"
             python -c "import fastapi, pytest; print('deps ok')"
+            ruff --version
+            mypy --version
         - name: lint
           script: |
             ruff check src tests
