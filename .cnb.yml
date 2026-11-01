@@ -12,6 +12,9 @@
 # 相关 scope，读不到 /-/build/logs（需要 repo-cnb-history:r），tag_push 的流水线
 # 一旦失败就成了黑盒。走 API 触发可以直接拿到构建号，再用
 # /-/build/status/{sn} 查状态与失败阶段。
+#
+# 依赖安装拆成三个独立 stage 也是同一个理由：日志读不到时，失败 stage 的名字
+# 就是唯一的诊断信号——是索引不通、还是运行期依赖、还是测试工具装不上。
 
 main:
   push:
@@ -19,12 +22,21 @@ main:
       docker:
         image: python:3.12-bookworm
       env:
-        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_INDEX_URL: https://mirrors.cloud.tencent.com/pypi/simple
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        PIP_NO_INPUT: "1"
       stages:
-        - name: install
+        - name: probe index
           script: |
             python -V
-            pip install -e ".[dev]"
+            pip -V
+            pip download --no-deps --dest /tmp/probe hatchling
+        - name: install runtime deps
+          script: |
+            pip install -e . --timeout 60
+        - name: install dev tools
+          script: |
+            pip install pytest pytest-asyncio pytest-xdist httpx ruff mypy --timeout 60
         - name: lint
           script: |
             ruff check src tests
@@ -42,7 +54,9 @@ main:
       docker:
         image: python:3.12-bookworm
       env:
-        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_INDEX_URL: https://mirrors.cloud.tencent.com/pypi/simple
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        PIP_NO_INPUT: "1"
         # 构建产物由 /videogen 子路径提供，与线上 nginx 的挂载保持一致。
         BASE_URL: /videogen
       stages:
@@ -50,11 +64,17 @@ main:
           script: |
             test -n "$RELEASE_TAG" || { echo "RELEASE_TAG is required"; exit 1; }
             echo "releasing $RELEASE_TAG"
-
-        - name: install
+        - name: probe index
           script: |
             python -V
-            pip install -e ".[dev]"
+            pip -V
+            pip download --no-deps --dest /tmp/probe hatchling
+        - name: install runtime deps
+          script: |
+            pip install -e . --timeout 60
+        - name: install dev tools
+          script: |
+            pip install pytest pytest-asyncio pytest-xdist httpx ruff mypy --timeout 60
         - name: lint
           script: |
             ruff check src tests
@@ -65,9 +85,6 @@ main:
         - name: test
           script: |
             pytest -n 4 -m "not live" -q
-
-        # Dashboard 单独用 node 镜像构建：Python 镜像里没有 node，
-        # 装 node 又要动系统的 .bashrc，不如换镜像干净。
         - name: build dashboard
           image: node:22-bookworm
           script: |
@@ -80,14 +97,12 @@ main:
             tar -czf "dist-release/octop-dashboard-${RELEASE_TAG}.tar.gz" \
               -C src/octop/dashboard .
             ls -lh dist-release/
-
         - name: create release
           type: git:release
           options:
             tag: ${RELEASE_TAG}
             title: ${RELEASE_TAG}
             descriptionFromFile: CHANGELOG.md
-
         # git:release 只把源码打包上传，任意产物要靠 attachments 插件，
         # 且必须在 Release 已存在之后执行。
         - name: upload dashboard artifact
@@ -102,13 +117,22 @@ $:
       docker:
         image: python:3.12-bookworm
       env:
-        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_INDEX_URL: https://mirrors.cloud.tencent.com/pypi/simple
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        PIP_NO_INPUT: "1"
         BASE_URL: /videogen
       stages:
-        - name: install
+        - name: probe index
           script: |
             python -V
-            pip install -e ".[dev]"
+            pip -V
+            pip download --no-deps --dest /tmp/probe hatchling
+        - name: install runtime deps
+          script: |
+            pip install -e . --timeout 60
+        - name: install dev tools
+          script: |
+            pip install pytest pytest-asyncio pytest-xdist httpx ruff mypy --timeout 60
         - name: lint
           script: |
             ruff check src tests
@@ -116,12 +140,10 @@ $:
         - name: typecheck
           script: |
             mypy src/octop
-
         # tag 流水线里质量门禁排在最前：测试不过就不该产出可下载的发版产物。
         - name: test
           script: |
             pytest -n 4 -m "not live" -q
-
         - name: build dashboard
           image: node:22-bookworm
           script: |
@@ -133,14 +155,12 @@ $:
             tar -czf "dist-release/octop-dashboard-${CNB_BRANCH}.tar.gz" \
               -C src/octop/dashboard .
             ls -lh dist-release/
-
         - name: create release
           type: git:release
           options:
             tag: ${CNB_BRANCH}
             title: ${CNB_BRANCH}
             descriptionFromFile: CHANGELOG.md
-
         - name: upload dashboard artifact
           image: cnbcool/attachments:latest
           settings:
