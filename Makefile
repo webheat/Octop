@@ -11,7 +11,9 @@
 #   - uv              (recommended) or pip
 #   - twine           (publish: pip install twine / make install-tools)
 
-SHELL := /bin/bash
+# A Windows host has no /bin/bash: set WIN_SHELL to Git for Windows' bash (the hook's
+# .githooks/local.env can export it).
+SHELL := $(if $(WIN_SHELL),$(WIN_SHELL),/bin/bash)
 .DEFAULT_GOAL := help
 
 REPO_ROOT     := $(shell pwd)
