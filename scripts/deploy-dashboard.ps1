@@ -179,7 +179,30 @@ Info "入口 hash: $(if ($LocalEntry) { $LocalEntry } else { '未识别' })"
 Info "目标     : ${Target}:${Port} → ${Dst}"
 Info "传输方式 : $(if ($RsyncExe) { "rsync 增量（$RsyncExe）" } else { 'scp + 远端镜像（本机无 rsync，全量上传）' })"
 
-if (-not $LocalEntry) { Warn 'index.html 里没识别到入口 chunk，请确认是不是子路径构建产物' }
+if (-not $LocalEntry) { Fail "$Src/index.html 里没识别到入口 chunk（assets/index.*.js），产物可能不是本次构建的；先加 -Build 重新构建再同步" }
+
+# 产物新鲜度：$Src 是构建产物，源码在 dashboard/。
+# 产物比源码旧 = 这次同步会把线上更新的界面回滚成旧版本，必须先重新构建。
+$dashSrc = Join-Path $RepoRoot 'dashboard'
+if (Test-Path -LiteralPath $dashSrc) {
+  $candidates = @()
+  $srcDir = Join-Path $dashSrc 'src'
+  if (Test-Path -LiteralPath $srcDir) { $candidates += Get-ChildItem -LiteralPath $srcDir -Recurse -File }
+  foreach ($f in @('index.html', 'vite.config.ts', 'package.json')) {
+    $p = Join-Path $dashSrc $f
+    if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
+  }
+  $newest = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $artifactTime = (Get-Item -LiteralPath $indexPath).LastWriteTime
+  if ($newest -and $newest.LastWriteTime -gt $artifactTime) {
+    $msg = "产物已过期：$indexPath（$($artifactTime.ToString('yyyy-MM-dd HH:mm'))）早于前端源码 $($newest.Name)（$($newest.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))）；直接同步会把线上更新的界面回滚成旧版本"
+    if ($env:OCTOP_DEPLOY_ALLOW_STALE -eq '1') {
+      Warn "$msg（已按 OCTOP_DEPLOY_ALLOW_STALE=1 放行）"
+    } else {
+      Fail "$msg`n先用 -Build 重新构建；确认要部署现成产物再设 OCTOP_DEPLOY_ALLOW_STALE=1"
+    }
+  }
+}
 
 # ---------- 1. SSH 参数 ----------
 $KeyFile = $env:OCTOP_DEPLOY_KEY
@@ -248,7 +271,12 @@ D="__DST__"
 echo "dir=$(test -d "$D" && echo yes || echo no)"
 echo "files=$(find "$D" -type f 2>/dev/null | wc -l)"
 echo "entry=$(grep -oE 'assets/index\.[A-Za-z0-9_-]+\.js' "$D/index.html" 2>/dev/null | head -1)"
-echo "svc=$(systemctl list-units --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -m1 '^octop' || true)"
+# 精确匹配 octop.service：octop-watchdog.service 在字典序里排在前面，
+# 用 '^octop' 会误选看门狗单元，导致 -Restart 重启错服务。
+UNITS=$(systemctl list-units --type=service --no-legend 2>/dev/null | awk '{print $1}')
+SVC=$(echo "$UNITS" | grep -m1 '^octop\.service$' || true)
+if [ -z "$SVC" ]; then SVC=$(echo "$UNITS" | grep -m1 '^octop' || true); fi
+echo "svc=$SVC"
 '@
 $infoCmd = $infoTpl.Replace('__DST__', $Dst)
 $remoteInfo = Invoke-RemoteScript $infoCmd
@@ -277,9 +305,11 @@ if ($DryRun) {
   Say 'DRY-RUN（不写远端）'
   if ($RsyncExe) {
     $dryOpts = @('-rlzt', '--chmod=D755,F644', '--exclude=__init__.py', '--exclude=.gitkeep')
+    if (-not $NoDelete) { $dryOpts += '--delete' }
+    $dryOpts += @('-n', '--itemize-changes', '-e', $sshForKey)
     Push-Location $Src
     try {
-      & $RsyncExe @dryOpts -n --delete --itemize-changes -e $sshForKey './' $remoteDst
+      & $RsyncExe @dryOpts './' $remoteDst
     } finally { Pop-Location }
   } else {
     Info "将上传 $LocalFiles 个文件（$LocalMb MB），远端现有 $(if ($remote.files) { $remote.files } else { '0' }) 个"
@@ -316,7 +346,8 @@ fi
       if ($t -match '^backup=(.+)$') { $script:BackupPath = $matches[1] }
     }
   } else {
-    Warn '备份失败（不阻断部署）'
+    Warn '备份失败（不阻断部署）；本次部署没有可用的回滚点'
+    $script:BackupFailed = $true
   }
 }
 
@@ -336,20 +367,39 @@ if ($RsyncExe) {
     if ($LASTEXITCODE -ne 0) { Fail 'rsync 同步失败' }
   } finally { Pop-Location }
 } else {
-  $stage = '/tmp/octop-dash-deploy'
+  if (-not (Get-Command scp -ErrorAction SilentlyContinue)) { Fail '找不到 scp，请先安装 OpenSSH 客户端' }
+
+  # 每次部署用独立 staging 目录：并发部署或上次中断的残留不会互相覆盖
+  $mk = Invoke-RemoteScript "stage=`$(mktemp -d /tmp/octop-dash.XXXXXX) || exit 3`necho `"stage=`$stage`""
+  $stage = ''
+  foreach ($l in ($mk.Output -split "`r?`n")) {
+    if ("$l".Trim() -match '^stage=(.+)$') { $stage = $matches[1].Trim() }
+  }
+  if ($mk.Code -ne 0 -or -not $stage) { Fail '无法创建远端临时目录' }
   Info "上传到远端临时目录 $stage …"
-  $mk = Invoke-RemoteScript "rm -rf '$stage' && mkdir -p '$stage' && echo STAGE_OK"
-  if ($mk.Code -ne 0) { Fail '无法创建远端临时目录' }
 
   $items = Get-ChildItem -LiteralPath $Src -Force | ForEach-Object { $_.FullName }
   & scp @scpArgs -r @items "${Target}:$stage"
   if ($LASTEXITCODE -ne 0) { Fail 'scp 上传失败' }
 
+  # 上传内容必须先落到位再镜像：否则远端 rsync --delete 会拿空目录清空线上前端
+  $stageCheck = Invoke-RemoteScript "[ -f '$stage/index.html' ] || { echo STAGE_MISSING_INDEX >&2; exit 3 }`necho STAGE_OK"
+  if ($stageCheck.Code -ne 0) {
+    Invoke-RemoteScript "rm -rf '$stage'" | Out-Null
+    Fail '上传内容不完整（远端临时目录缺少 index.html），已中止同步，线上未被改动'
+  }
+
   $delFlag = if ($NoDelete) { '' } else { '--delete ' }
-  $mirrorCmd = "mkdir -p '$Dst' && rsync -a $delFlag--exclude=__init__.py --exclude=.gitkeep '$stage/' '$Dst/' && echo ""runtime_files=`$(find '$Dst' -type f | wc -l)"" && rm -rf '$stage'"
+  $mirrorCmd = "command -v rsync >/dev/null 2>&1 || { echo REMOTE_RSYNC_MISSING >&2; exit 4; }; mkdir -p '$Dst' && rsync -a $delFlag--exclude=__init__.py --exclude=.gitkeep '$stage/' '$Dst/' && echo ""runtime_files=`$(find '$Dst' -type f | wc -l)"" && rm -rf '$stage'"
   $mf = Invoke-RemoteScript $mirrorCmd
   $mf.Output | ForEach-Object { if ("$_".Trim()) { Info "$_".Trim() } }
-  if ($mf.Code -ne 0) { Fail '远端镜像失败' }
+  if ($mf.Code -ne 0) {
+    Invoke-RemoteScript "rm -rf '$stage'" | Out-Null
+    if ("$($mf.Output)".Trim() -match 'REMOTE_RSYNC_MISSING') {
+      Fail '远端没有 rsync，无法做镜像；请在服务器上安装 rsync，或改用本机 rsync 增量模式'
+    }
+    Fail '远端镜像失败'
+  }
 }
 
 $sw.Stop()
@@ -360,8 +410,13 @@ Say '远端校验'
 $checkCmd = "grep -oE 'assets/index\.[A-Za-z0-9_-]+\.js' '$Dst/index.html' 2>/dev/null | head -1; echo ""files=`$(find '$Dst' -type f | wc -l)"""
 $chkRes = Invoke-RemoteScript $checkCmd
 $chkLines = @($chkRes.Output -split "`r?`n" | Where-Object { $_.Trim() })
-$remoteEntry = if ($chkLines.Count -gt 0) { $chkLines[0].Trim() } else { '' }
-foreach ($l in $chkLines) { Info $l.Trim() }
+$remoteEntry = ''
+foreach ($l in $chkLines) {
+  $t = $l.Trim()
+  # 只认匹配入口 chunk 的行：ssh 的 stderr 也混在输出里，首行未必是 hash
+  if ($t -match '^assets/index\.[A-Za-z0-9_-]+\.js$') { $remoteEntry = $t }
+  Info $t
+}
 if ($remoteEntry -eq $LocalEntry) {
   Info '入口一致 ✅'
 } else {
@@ -410,5 +465,7 @@ if (-not $NoVerify) {
 Say '完成'
 if ($script:BackupPath) {
   Info "回滚：ssh -p $Port $Target ``cp -a $($script:BackupPath)/. $Dst/``"
+} elseif ($script:BackupFailed) {
+  Warn '本次部署没有备份回滚点'
 }
 Info '提示：前端由后端实时读盘，无需重启 octop 服务。'

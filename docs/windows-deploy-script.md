@@ -2,8 +2,11 @@
 
 `scripts/deploy-dashboard.ps1` 是 `scripts/deploy-dashboard.sh` 的 Windows 等价实现，
 用于在开发机（Windows）上把 `src/octop/dashboard/` 的构建产物增量同步到线上服务器。
-行为完全对齐 sh 版：**rsync 增量 + 远端备份（留 5 份）+ 入口 hash 校验 + 线上探活**；
+核心语义一致：**rsync 增量 + 远端备份（留 5 份）+ 入口 hash 校验 + 线上探活**；
 本机没装 rsync 时退化为 `scp` 上传 + 远端镜像。
+
+两版并非逐行等价，差异见 [第 8 节](#8-与-sh-版的差异)：sh 版有 SSH 连接复用与密码回退，
+ps1 版走 `scp` 上传（sh 版走 tar 流）。**远端镜像那一步，两版都要求服务器上装了 rsync。**
 
 > 本文按「用法 → 执行流程 → 环境准备 → 踩坑（症状/原因/修法）→ 事故复盘」组织。
 > 只看坑，直接跳 [第 4 节](#4-windows--ps-51-的六个硬坑)。
@@ -37,7 +40,7 @@ Git Bash 里优先用 `.sh` 版，不要混着用。
 | `-NoDelete` | 不删远端多余文件（默认 `--delete`，会清旧 hash 产物） |
 | `-NoBackup` | 跳过同步前备份 |
 | `-Restart` | 同步后 `systemctl restart` 远端服务 |
-| `-NoVerify` | 跳过入口 hash 比对与线上探活 |
+| `-NoVerify` | 跳过线上探活（远端落地校验与入口 hash 比对始终执行） |
 | `-Server` / `-Port` / `-RemoteUser` | 覆盖默认目标（默认 `ocdev.aixifs.com` / `13122` / `root`） |
 | `-Help` | 打印帮助 |
 
@@ -59,6 +62,7 @@ Git Bash 里优先用 `.sh` 版，不要混着用。
 | `OCTOP_DEPLOY_BASE_PATH` | `/videogen` |
 | `OCTOP_DEPLOY_BACKUP_ROOT` | `/opt/octop-data/dashboard-backups` |
 | `OCTOP_DEPLOY_KEEP_BACKUPS` | `5` |
+| `OCTOP_DEPLOY_ALLOW_STALE` | 不设 = 产物过期时中止同步；设 `1` = 放行 |
 
 ### 一次成功运行的实际输出（参考基线）
 
@@ -76,11 +80,13 @@ Git Bash 里优先用 `.sh` 版，不要混着用。
 ```
 参数解析 → 找 rsync / 找 MSYS ssh
    ↓
+产物闸门：入口 chunk 必须存在；产物比 dashboard/src 旧则中止（防回滚线上）
+   ↓
 远端探测（文件数、入口 hash、octop.service 是否存在）
    ↓
 [DryRun] rsync -n --itemize-changes → 打印差异 → 退出
    ↓
-远端备份 → tar 到 /opt/octop-data/dashboard-backups/<ts>（保留 5 份，可回滚）
+远端备份 → cp -a 到 /opt/octop-data/dashboard-backups/<ts>（保留 5 份，可回滚）
    ↓
 rsync 增量同步（--delete，保留 __init__.py / .gitkeep）
    ↓
@@ -347,14 +353,17 @@ ssh——部署脚本探测 + 手动重试 + 轮询重连叠加。**不是网络
 **修法**
 
 - **别写重试循环**。每次重试都是一次新的未认证连接，越试越糟。
-- 部署脚本已改为**始终启用连接复用**，整轮部署只握一次手：
+- **sh 版已改为始终启用连接复用**，整轮部署只握一次手：
 
-  ```powershell
+  ```bash
   -o ControlMaster=auto -o ControlPath=<mktemp dir>/octop-deploy-%r@%h:%p -o ControlPersist=180
   ```
 
   > 历史 bug：原来只在**密码模式**才启用复用，且 `ControlPath` 引用了未定义的 `$TMPDIR`
   > （本机没这个变量，路径退化成 `/octop-deploy-...`）。两处都已修。
+- **ps1 版没有连接复用**：Windows 自带的 OpenSSH 不支持 `ControlMaster`，一轮部署会开
+  4~6 条独立 SSH 连接，更容易撞上限流。已经撞上了就**改用 sh 版**（Git Bash 里跑
+  `bash scripts/deploy-dashboard.sh`），或者把部署拆成「先同步、后单独验证」两步。
 - 已经撞上了就**等 3~10 分钟再跑一次**，不要循环。
 
 ---
@@ -370,6 +379,21 @@ ssh——部署脚本探测 + 手动重试 + 轮询重连叠加。**不是网络
 
 产物落在 `src/octop/dashboard/`（`vite.config.ts` 的 `outDir` 写死），
 且 **`.gitignore` 排除了该目录**——产物不入 git，走「构建 → 同步」而不是「提交产物」。
+
+---
+
+## 8. 与 sh 版的差异
+
+| | ps1（Windows） | sh（Git Bash / Linux） |
+|---|---|---|
+| 本机 rsync 有 | `rsync` 直连增量 | `rsync` 直连增量 |
+| 本机 rsync 无 | `scp` 上传到远端临时目录 → 远端 `rsync -a` 镜像 | `tar` 流上传 → 远端 `rsync -a` 镜像 |
+| 远端要求 | **服务器必须装了 rsync**（镜像那一步靠它） | 同左 |
+| SSH 连接复用 | 无（Windows OpenSSH 不支持 `ControlMaster`） | 有（`ControlMaster=auto`） |
+| 密码登录回退 | 无（探测走 `BatchMode=yes`，只能用密钥） | 有 |
+
+两版共同的硬要求：**上传内容必须先在远端临时目录校验通过**（`index.html` 存在）才做镜像，
+否则 `rsync --delete` 会拿空目录把线上前端清掉。
 
 ---
 

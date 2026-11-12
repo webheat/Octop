@@ -8,6 +8,10 @@
 
 ### 修复
 - 升级 `octop-harness` 到 1.0.5：子进程输出改为在 `execute()` 内解码（`decode_child_output`），Octop 不再替换 stdlib `subprocess`；DeepSeek 快速档的模型 id 由 `deepseek-v4-flash` 更名为 `deepseek-flash`
+- 部署同步：产物比 `dashboard/src` 旧时中止同步，不再把线上更新的前端回滚成旧版本（`OCTOP_DEPLOY_ALLOW_STALE=1` 可放行）
+- 部署同步：本机无 rsync 走 scp 回退时，先校验远端临时目录里有 `index.html` 才做镜像，远端缺 rsync 时明确报错——不再有拿空目录 `rsync --delete` 清空线上前端的路径
+- 部署同步：`-Restart` 精确匹配 `octop.service`，不再误选 `octop-watchdog.service` 把看门狗当服务重启
+- 部署同步：`-DryRun` 预览与 `-NoDelete` 行为一致；远端入口 hash 校验只认匹配 `assets/index.*.js` 的行，ssh 的 stderr 混入不再造成误判
 
 ## [1.4.0] - 2026-11-01
 

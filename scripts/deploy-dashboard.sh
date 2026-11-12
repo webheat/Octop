@@ -105,8 +105,23 @@ info "目标     : ${REMOTE_USER}@${HOST}:${PORT} → ${DST}"
 
 case "$LOCAL_ENTRY" in
   assets/*) ;;
-  *) warn "index.html 里没识别到入口 chunk，请确认是不是子路径构建产物" ;;
+  *) die "index.html 里没识别到入口 chunk（assets/index.*.js），产物可能不是本次构建的；先跑 --build 重新构建再同步" ;;
 esac
+
+# 产物新鲜度：$SRC 是构建产物，源码在 dashboard/。
+# 产物比源码旧 = 这次同步会把线上更新的界面回滚成旧版本，必须先重新构建。
+if [ -d "$REPO_ROOT/dashboard/src" ]; then
+  NEWEST_SRC="$(find "$REPO_ROOT/dashboard/src" -type f -newer "$SRC/index.html" -print -quit 2>/dev/null)"
+  if [ -n "$NEWEST_SRC" ]; then
+    MSG="产物已过期：$SRC/index.html 早于前端源码 $NEWEST_SRC；直接同步会把线上更新的界面回滚成旧版本"
+    if [ "${OCTOP_DEPLOY_ALLOW_STALE:-}" = "1" ]; then
+      warn "$MSG（已按 OCTOP_DEPLOY_ALLOW_STALE=1 放行）"
+    else
+      die "$MSG
+先用 --build 重新构建；确认要部署现成产物再设 OCTOP_DEPLOY_ALLOW_STALE=1"
+    fi
+  fi
+fi
 
 # ---------- 1. 组装 ssh 参数 ----------
 KEYFILE="${OCTOP_DEPLOY_KEY:-}"
@@ -143,7 +158,7 @@ else
 fi
 
 REMOTE_INFO="$(ssh "${SSH_ARGS[@]}" "${REMOTE_USER}@${HOST}" \
-  "set -e; echo \"dir=\$(test -d '$DST' && echo yes || echo no)\"; echo \"files=\$(find '$DST' -type f 2>/dev/null | wc -l)\"; echo \"entry=\$(grep -oE 'assets/index\\.[A-Za-z0-9_-]+\\.js' '$DST/index.html' 2>/dev/null | head -1)\"; echo \"svc=\$(systemctl list-units --type=service --no-legend 2>/dev/null | awk '{print \$1}' | grep -m1 '^octop' || true)\"" \
+  "set -e; echo \"dir=\$(test -d '$DST' && echo yes || echo no)\"; echo \"files=\$(find '$DST' -type f 2>/dev/null | wc -l)\"; echo \"entry=\$(grep -oE 'assets/index\\.[A-Za-z0-9_-]+\\.js' '$DST/index.html' 2>/dev/null | head -1)\"; UNITS=\$(systemctl list-units --type=service --no-legend 2>/dev/null | awk '{print \$1}'); SVC=\$(echo \"\$UNITS\" | grep -m1 '^octop\\.service\$' || true); if [ -z \"\$SVC\" ]; then SVC=\$(echo \"\$UNITS\" | grep -m1 '^octop' || true); fi; echo \"svc=\$SVC\"" \
   )" || die "无法连接 ${REMOTE_USER}@${HOST}:${PORT}"
 eval "$REMOTE_INFO"
 
@@ -162,7 +177,9 @@ if [ "$DRY_RUN" = 1 ]; then
   say "DRY-RUN"
   if command -v rsync >/dev/null; then
     info "本机有 rsync（$(rsync --version | head -1 | awk '{print $3}')），逐文件差异如下："
-    rsync "${RSYNC_OPTS[@]}" -n --delete --itemize-changes -e "ssh ${SSH_ARGS[*]}" \
+    DRY_DELETE_FLAG=""
+    [ "$DO_DELETE" = 1 ] && DRY_DELETE_FLAG="--delete"
+    rsync "${RSYNC_OPTS[@]}" -n $DRY_DELETE_FLAG --itemize-changes -e "ssh ${SSH_ARGS[*]}" \
       "$SRC/" "${REMOTE_USER}@${HOST}:${DST}/" \
       | sed 's/^/    /' | head -60
   else

@@ -94,8 +94,12 @@ powershell -File scripts/wheel_build.ps1
 | Windows (PowerShell) | `powershell -ExecutionPolicy Bypass -File scripts/deploy-dashboard.ps1` |
 | Git Bash / Linux / macOS | `bash scripts/deploy-dashboard.sh` |
 
-常用参数：`-DryRun` 先看差异、`-Build` 先构建、`-NoDelete` 不清旧文件、`-Restart` 重启服务。
+常用参数：`-DryRun` 先看差异、`-Build` 先构建、`-NoDelete` 不清旧文件、`-Restart` 重启服务、
+`-NoBackup` 跳过备份、`-NoVerify` 跳过线上探活、`-Server` / `-Port` / `-RemoteUser` 改目标。
 **不需要重启后端**，但客户端要硬刷新（Service Worker 缓存）。
+
+产物比 `dashboard/src` 旧时脚本会**中止**（避免把线上更新的界面回滚成旧版本）；
+确实要部署现成产物时设 `OCTOP_DEPLOY_ALLOW_STALE=1` 放行。
 
 Windows 上有一批专属坑（脚本必须带 UTF-8 BOM、rsync 要配 MSYS ssh、私钥 ACL 校验等），
 详见 **[docs/windows-deploy-script.md](../docs/windows-deploy-script.md)**。
