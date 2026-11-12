@@ -18,6 +18,7 @@
 - GitHub → CNB 镜像：陈旧分支判定由子串匹配改为整行精确匹配，`refs/heads/feature` 不再命中 `refs/heads/feature/x`
 - GitHub → CNB 镜像：缺少 `flock` 时不再静默 exit 0（cron 误判为同步成功，实际什么都没同步）；`ls-remote` 失败时显式记异常；fetch 失败不再让报告因未定义变量而截断
 - GitHub → CNB 镜像（Actions）：校验比对剔除 CNB 自有的 `ci/reports` 分支，此前该分支让每次镜像都判红
+- 新增 `.gitattributes` 固定 `*.sh` 为 LF 行尾：Windows 检出（`core.autocrlf=true`）曾把 shell 脚本写成 CRLF，在严格 bash（WSL）下直接语法报错，也可能被原样拷到 Linux 服务器上跑不起来
 - 飞牛打包资产（`fnos/docker/manifest`、`fnos/native/manifest`、`fnos/docker/app/docker/docker-compose.yaml`）的版本号此前停在 1.2.0，与 `pyproject.toml` 的 1.4.0 不一致，商店与镜像标签都会带错版本——现与项目版本对齐
 
 ## [1.4.0] - 2026-11-01

@@ -1,0 +1,6 @@
+# Shell scripts keep LF endings everywhere.
+#
+# The *.sh files run on the Linux servers and are also executed from a Windows
+# checkout (Git Bash or WSL). A stray CR turns "do" into "do\r" and breaks the
+# parser, so the line ending has to be pinned rather than left to core.autocrlf.
+*.sh text eol=lf
