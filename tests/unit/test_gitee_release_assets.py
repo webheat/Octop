@@ -41,8 +41,17 @@ def test_matches_platform_keeps_the_platform_neutral_assets() -> None:
 
 
 def test_select_splits_by_size_and_platform() -> None:
+    """Gitee carries the remote client and the video components.
+
+    The slim installer runs a local runtime the reader fetches separately and
+    the Python packages belong on PyPI — neither is distributed here, and the
+    download page does not offer them, so carrying them would leave
+    attachments nobody links to.
+    """
     assets = _load("assets")
     release_assets = [
+        _asset("Octop-desktop-windows-amd64-1.4.0.exe", 6 * MB),
+        _asset("Octop-video-components-windows-x64-1.4.0.exe", 72 * MB),
         _asset("Octop-desktop-slim-windows-amd64-1.4.0.exe", 20 * MB),
         _asset("Octop-desktop-slim-darwin-arm64-1.4.0.dmg", 20 * MB),
         _asset("Octop-portable-windows-amd64-1.4.0.zip", 290 * MB),
@@ -50,30 +59,32 @@ def test_select_splits_by_size_and_platform() -> None:
     ]
     small, large = assets.select(release_assets, "windows")
     assert [a["name"] for a in small] == [
-        "Octop-desktop-slim-windows-amd64-1.4.0.exe",
-        "octop-1.4.0-py3-none-any.whl",
+        "Octop-desktop-windows-amd64-1.4.0.exe",
+        "Octop-video-components-windows-x64-1.4.0.exe",
     ]
     assert [a["name"] for a in large] == ["Octop-portable-windows-amd64-1.4.0.zip"]
 
     small_all, large_all = assets.select(release_assets, "all")
-    assert len(small_all) == 3
+    assert len(small_all) == 2
     assert len(large_all) == 1
 
 
 def test_release_notes_point_at_the_github_runtime() -> None:
+    """What did not fit stays on the GitHub Release and is linked from there."""
     notes = _load("release_notes")
     release = {
         "body": "Octop 1.4.0",
         "assets": [
-            _asset("Octop-desktop-slim-windows-amd64-1.4.0.exe", 20 * MB),
             _asset("Octop-portable-windows-amd64-1.4.0.zip", 290 * MB),
+            _asset("octop-1.4.0-py3-none-any.whl", 22 * MB),
         ],
     }
     text = notes.build(release, "owner/repo", "v1.4.0", "windows")
-    assert "首次启动会从 GitHub Release 下载约 213 MB 的运行时" in text
-    assert "CDN" not in text
     assert "Octop-portable-windows-amd64-1.4.0.zip" in text
     assert "https://github.com/owner/repo/releases/download/v1.4.0" in text
+    # Nothing was uploaded to Gitee, so the notes must not claim otherwise.
+    assert "以下产物已上传到 Gitee" not in text
+    assert "octop-1.4.0-py3-none-any.whl" not in text
 
 
 def test_release_notes_link_the_components_from_gitee() -> None:
@@ -96,12 +107,12 @@ def test_release_notes_leave_the_other_platforms_out() -> None:
     release = {
         "body": "",
         "assets": [
-            _asset("Octop-desktop-slim-windows-amd64-1.4.0.exe", 20 * MB),
-            _asset("Octop-desktop-slim-darwin-arm64-1.4.0.dmg", 20 * MB),
+            _asset("Octop-desktop-windows-amd64-1.4.0.exe", 6 * MB),
+            _asset("Octop-desktop-darwin-arm64-1.4.0.dmg", 6 * MB),
         ],
     }
     text = notes.build(release, "owner/repo", "v1.4.0", "windows")
-    assert "Octop-desktop-slim-windows-amd64-1.4.0.exe" in text
+    assert "Octop-desktop-windows-amd64-1.4.0.exe" in text
     assert "darwin" not in text
 
 

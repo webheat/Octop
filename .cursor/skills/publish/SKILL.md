@@ -26,7 +26,7 @@ disable-model-invocation: true
 | `README_GLOB` | `README*.md` | 含 shields.io 版本徽标的 README（含多语言变体，如 `README.md`、`README_CN.md`）；全部同步升级 |
 | `INIT_VERSION_FILE` | `src/octop/__init__.py` | 含运行时常量 `__version__` 的文件（缺失则跳过并提示） |
 | `TAG_PREFIX` | `v` | Git tag 前缀；工作流监听 `v*`，生成 `v0.1.14` 风格标签 |
-| `REMOTE` | `origin` | Git 远程仓库名 |
+| `REMOTE` | `fork` | Git 远程仓库名。**本仓库的 `origin` 指向上游 TencentCloud/Octop（只读，推送会被拒），可写的是自己的 `fork`（zhuimeng2026-hub/Octop）** |
 | `INTEGRATION_BRANCH` | `develop` | 日常集成分支；release 必须从最新 tip 切出 |
 | `TARGET_BRANCH` | `main` | 合并请求的目标分支（生产真源） |
 | `RELEASE_BRANCH_PREFIX` | `release/` | release 分支名前缀 |

@@ -78,6 +78,9 @@ if [[ -n "$body_file" ]]; then
     exit 1
   fi
   body="$(cat "$body_file")"
+  # The notes are published verbatim, so normalise CRLF — a notes file written
+  # on Windows would otherwise reach the release page with Windows line ends.
+  body="${body//$'\r'/}"
 fi
 
 # Scratch file for the response body of an attachment upload — Gitee's error
@@ -143,6 +146,7 @@ case "$status" in
     release_body="$(printf '%s' "$response" | body_of)"
     require_json "$release_body" "the release of ${tag}"
     release_id="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("id",""))')"
+    existing_target="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("target_commitish",""))')"
     existing_assets="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print("\n".join(a.get("name","") for a in (d.get("assets") or [])))')"
     ;;
   404)
@@ -164,6 +168,28 @@ esac
 
 if [[ -n "$release_id" ]]; then
   echo "Reusing the existing Gitee release ${release_id} for ${tag}"
+  # The body carries the download links and the asset list. A re-publish with
+  # fresh notes must update it, or the release page keeps advertising the
+  # previous round's files.
+  if [[ -n "$body" ]]; then
+    patch="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$body")"
+    response="$(api_json PATCH "/repos/${owner}/${repo}/releases/${release_id}" "$patch")"
+    status="$(printf '%s' "$response" | status_of)"
+    if [[ "$status" != "200" && "$status" != "201" ]]; then
+      echo "::error::could not update the release notes (HTTP ${status})" >&2
+      printf '%s\n' "$response" | body_of >&2
+      exit 1
+    fi
+    echo "Updated the release notes"
+  fi
+  # Gitee cannot move an existing tag. If the download page moved on (a new
+  # commit), the tag still points at the old one and the release page shows
+  # the previous download page — say so instead of pretending it worked.
+  if [[ -n "$base_sha" && -n "$existing_target" && "$base_sha" != "$existing_target" ]]; then
+    echo "::warning::the tag ${tag} still points at ${existing_target}, not at the new download page (${base_sha})." >&2
+    echo "  Gitee cannot move an existing tag — publish this round under a new tag" >&2
+    echo "  (e.g. ${tag%.*}-gitee.$((${tag##*.} + 1)))." >&2
+  fi
 else
   # The tag may already exist (pushed over SSH). Creating a release then
   # creates the tag as well, so only pass a target when the tag is missing.

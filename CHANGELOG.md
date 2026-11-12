@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 新增
+- Gitee 发布链的端到端测试（`tests/unit/test_gitee_publish.py` + `tests/support/gitee_mock.py`）：这条链此前从未在 CI 里跑过，失败模式全靠人肉记忆。现在用本地假 Gitee API 覆盖了正常路径（stdout 只有 sha、target_commitish 干净、正文未被污染、重复发布幂等）与四条失败路径（令牌被拒、仓库不存在、页面残留旧 tag、tag 移不动）
+
 ### 修复
 - 升级 `octop-harness` 到 1.0.5：子进程输出改为在 `execute()` 内解码（`decode_child_output`），Octop 不再替换 stdlib `subprocess`；DeepSeek 快速档的模型 id 由 `deepseek-v4-flash` 更名为 `deepseek-flash`
 - 部署同步：产物比 `dashboard/src` 旧时中止同步，不再把线上更新的前端回滚成旧版本（`OCTOP_DEPLOY_ALLOW_STALE=1` 可放行）
@@ -25,6 +28,12 @@
 - Gitee 下载页改为按本次发布的 tag / owner / repo 渲染：此前页面里写死了上一版的 tag 与安装器文件名，发新版本时用户会从新 Release 页面下到旧安装器，而且因为内容与线上完全一致、连一次提交都不会产生，全程没有任何报错；现在渲染后若页面仍指向别的 tag 或版本，发布直接中止并点名是哪一个
 - Gitee 发布链：401 / 403 不再与 404 同路径（此前令牌过期被报成"Release 不存在"，真因被掩盖），改为明确提示令牌需要 projects 权限；附件上传失败会打印 Gitee 的错误正文，响应体不是合法 JSON 时明确指出是哪个 API 失败而不是静默退出
 - Gitee 下载页按行尾无关的方式比对内容：Windows 检出（`core.autocrlf=true`）曾让页面每次都被判定"内容变了"，与 CI 互相翻转仓库里的 README
+- Gitee 附件规则收进一处：`scripts/gitee/assets.py` 成为唯一事实源，CI 与本地手工发布都调同一个脚本（`scripts/gitee/publish_from_github.sh`）。此前 CI 自带一份内联 jq，与脚本的规则不一致——同一个 tag 在 CI 传 3 个附件、在本地传 6 个
+- Gitee 的分发范围明确为"远程版客户端 + 视频制作组件"：slim 客户端（首次启动要另外下载运行时）与 Python 包不再上 Gitee——下载页与 Release 说明都不提供它们，传上去只是多出没人链接的附件
+- Gitee 复用已有 Release 时会刷新正文：此前 Release 说明里的下载链接不会更新，页面会一直留着上一轮的文件
+- Gitee 复用已有 Release 但下载页 commit 变了时会明确告警：Gitee 无法移动已存在的 tag，再发一次并不会让页面更新，需要换一个新 tag
+- Gitee Release 说明的正文按 LF 归一化：Windows 上写出的说明文件原本会带着 CRLF 原样传到 Gitee
+- 发版技能的 `REMOTE` 默认值改为 `fork`：本仓库的 `origin` 指向上游 TencentCloud/Octop（只读，推送会被拒），照原值走流程会卡在推送这一步
 
 ## [1.4.0] - 2026-11-01
 

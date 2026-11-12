@@ -1,7 +1,12 @@
 """Which release assets belong on Gitee.
 
-Two rules decide it:
+Three rules decide it:
 
+* Gitee carries what a remote-client reader installs: the client itself plus
+  the video components. The slim installer (it runs a local runtime the user
+  fetches separately) and the Python packages stay on the GitHub Release —
+  the download page and the release notes do not offer them, so carrying them
+  here would leave attachments nobody links to;
 * a Gitee attachment may not exceed 100 MB, so the big ones stay on the
   GitHub Release and are only linked from the notes;
 * this round delivers the Windows client only (see
@@ -19,6 +24,15 @@ GITEE_ATTACHMENT_LIMIT_BYTES = GITEE_ATTACHMENT_LIMIT_MB * 1024 * 1024
 
 # The platform tokens the release asset names carry.
 PLATFORMS = ("windows", "darwin", "linux")
+
+# Artifacts that are not distributed as Gitee attachments.
+NOT_ON_GITEE = ("slim", ".whl", ".tar.gz")
+
+
+def is_on_gitee(name: str) -> bool:
+    """Whether this artifact is distributed as a Gitee attachment."""
+    lowered = name.lower()
+    return not any(marker in lowered for marker in NOT_ON_GITEE)
 
 
 def is_small(asset: dict) -> bool:
@@ -51,9 +65,15 @@ def select(assets: list[dict], platform: str | None) -> tuple[list[dict], list[d
     """Split the assets into the ones Gitee carries and the ones it links.
 
     The first list fits both the attachment limit and the platform, the
-    second holds everything that is too big for a Gitee attachment.
+    second holds everything that is too big for a Gitee attachment. Assets that
+    are not distributed on Gitee at all (the slim installer, the Python
+    packages) are in neither list.
     """
-    wanted = [a for a in assets if matches_platform(a.get("name", ""), platform)]
+    wanted = [
+        a
+        for a in assets
+        if is_on_gitee(a.get("name", "")) and matches_platform(a.get("name", ""), platform)
+    ]
     small = [a for a in wanted if is_small(a)]
     large = [a for a in wanted if not is_small(a)]
     return small, large
