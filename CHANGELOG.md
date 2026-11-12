@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 修复
+- 升级 `octop-harness` 到 1.0.5：子进程输出改为在 `execute()` 内解码（`decode_child_output`），Octop 不再替换 stdlib `subprocess`；DeepSeek 快速档的模型 id 由 `deepseek-v4-flash` 更名为 `deepseek-flash`
+
 ## [1.4.0] - 2026-11-01
 
 ### 新增
