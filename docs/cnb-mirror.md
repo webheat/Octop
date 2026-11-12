@@ -94,13 +94,16 @@ remote.cnb.fetch       +refs/heads/*:refs/remotes/cnb/*
 
 | 坑 | 现象 | 处理 |
 |---|---|---|
-| Git Bash 没有 `flock`（util-linux 才有） | 脚本第 37-41 行的锁会失败 → 打印"已有同步任务在运行，本次跳过"后 `exit 0`，**静默什么都不做** | 在 PATH 上放一个返回 0 的最小 `flock` shim |
+| Git Bash 没有 `flock`（util-linux 才有） | 脚本检测不到 `flock` 时**直接退出（exit 2）并说明原因** | 装 util-linux 的 `flock`，或放一个最小 shim；不要再靠"静默跳过" |
 | `REPO_DIR` 默认 `/opt/Octop` | 找不到仓库直接退出 | 显式传 `REPO_DIR=D:/Octop` |
 
 ```bash
 mkdir -p /tmp/octop-shim && printf '#!/bin/sh\nexit 0\n' > /tmp/octop-shim/flock && chmod +x /tmp/octop-shim/flock
 REPO_DIR='D:/Octop' GIT_TERMINAL_PROMPT=0 PATH="/tmp/octop-shim:$PATH" bash scripts/sync_github_to_cnb.sh
 ```
+
+> 以前缺 `flock` 时脚本会打印"已有同步任务在运行"后 `exit 0`，cron 记为同步成功、
+> 实际什么都没同步。现在改为显式报错退出（exit 2），不会再有"假成功"。
 
 `GIT_TERMINAL_PROMPT=0` 是保险：凭据缺失时直接失败，而不是卡住等输入。
 

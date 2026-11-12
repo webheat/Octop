@@ -130,6 +130,8 @@ jobs:
             --repo "${SOURCE_REPO}" \
             --tag "${{ inputs.tag }}" \
             --platform "${PLATFORM}" \
+            --gitee-owner "${{ inputs.gitee_owner }}" \
+            --gitee-repo "${{ inputs.gitee_repo }}" \
             --out release-notes.md
           head -40 release-notes.md
 
@@ -142,7 +144,7 @@ jobs:
           sha="$(python3 scripts/gitee/push_readme.py \
             --owner "${{ inputs.gitee_owner }}" \
             --repo "${{ inputs.gitee_repo }}" \
-            --token "${GITEE_TOKEN}")"
+            --token "${GITEE_TOKEN}" | tail -1)"
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
       - name: Publish to Gitee

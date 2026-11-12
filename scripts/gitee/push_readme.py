@@ -71,7 +71,7 @@ def push_file(owner: str, repo: str, token: str, branch: str, target: str, sourc
     if status == 200:
         current = base64.b64decode(existing.get("content") or "")
         if current == content:
-            print(f"{target}: unchanged")
+            print(f"{target}: unchanged", file=sys.stderr)
             return ""
         payload = {
             "content": base64.b64encode(content).decode(),
@@ -94,7 +94,7 @@ def push_file(owner: str, repo: str, token: str, branch: str, target: str, sourc
     status, data = request(method, f"/repos/{owner}/{repo}/contents/{target}", token, payload)
     if status not in (200, 201):
         raise SystemExit(f"cannot write {target}: HTTP {status} {data}")
-    print(f"{target}: updated")
+    print(f"{target}: updated", file=sys.stderr)
     return data.get("commit", {}).get("sha", "")
 
 

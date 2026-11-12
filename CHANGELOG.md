@@ -12,6 +12,12 @@
 - 部署同步：本机无 rsync 走 scp 回退时，先校验远端临时目录里有 `index.html` 才做镜像，远端缺 rsync 时明确报错——不再有拿空目录 `rsync --delete` 清空线上前端的路径
 - 部署同步：`-Restart` 精确匹配 `octop.service`，不再误选 `octop-watchdog.service` 把看门狗当服务重启
 - 部署同步：`-DryRun` 预览与 `-NoDelete` 行为一致；远端入口 hash 校验只认匹配 `assets/index.*.js` 的行，ssh 的 stderr 混入不再造成误判
+- GitHub → Gitee 发布：`push_readme.py` 的进度输出改到 stderr，stdout 只剩 commit sha——此前多行输出会把 Gitee Release 的 `target_commitish` 写成垃圾值，Actions 里还会因 `Invalid format` 直接失败
+- GitHub → Gitee 发布：Release 说明里的下载链接此前写死 `webheat/octop_client`，现按实际 `--owner` / `--repo` 生成
+- GitHub → CNB 镜像：`git cherry` 判定失败（对象缺失、浅克隆）时不再当成"内容已并入上游"而误删远端分支，改为保守保留并记录异常
+- GitHub → CNB 镜像：陈旧分支判定由子串匹配改为整行精确匹配，`refs/heads/feature` 不再命中 `refs/heads/feature/x`
+- GitHub → CNB 镜像：缺少 `flock` 时不再静默 exit 0（cron 误判为同步成功，实际什么都没同步）；`ls-remote` 失败时显式记异常；fetch 失败不再让报告因未定义变量而截断
+- GitHub → CNB 镜像（Actions）：校验比对剔除 CNB 自有的 `ci/reports` 分支，此前该分支让每次镜像都判红
 
 ## [1.4.0] - 2026-11-01
 

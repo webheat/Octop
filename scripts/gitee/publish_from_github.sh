@@ -97,12 +97,13 @@ done <<< "$assets"
 # --- 2. the release notes ---------------------------------------------------
 GH_TOKEN="${gh_token}" python3 "${REPO_ROOT}/scripts/gitee/release_notes.py" \
   --repo "${source_repo}" --tag "${tag}" --platform "${platform}" \
+  --gitee-owner "${owner}" --gitee-repo "${repo}" \
   --out "${work_dir}/release-notes.md"
 # Windows: python text-mode writes CRLF; normalise so markdown and metadata stay clean.
 sed -i 's/\r$//' "${work_dir}/release-notes.md"
 
 # --- 3. the download page ---------------------------------------------------
-sha="$(python3 "${REPO_ROOT}/scripts/gitee/push_readme.py" --owner "${owner}" --repo "${repo}" | tr -d '\r')"
+sha="$(python3 "${REPO_ROOT}/scripts/gitee/push_readme.py" --owner "${owner}" --repo "${repo}" | tr -d '\r' | tail -1)"
 
 # --- 4. the release ---------------------------------------------------------
 bash "${REPO_ROOT}/scripts/gitee/publish_release.sh" \

@@ -34,6 +34,12 @@ mkdir -p "$STATE_DIR" "$ANOMALY_DIR"
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 
 # 同一时刻只允许一个同步任务
+# flock 缺失时 `flock -n 9` 返回 127，会被下面的 `!` 取反当成"已有任务在跑"
+# 而 exit 0 —— cron 会记为同步成功，实际什么都没同步。先显式检查。
+command -v flock >/dev/null 2>&1 || {
+    log "缺少 flock，无法加锁：请安装 util-linux 的 flock 或提供 flock shim"
+    exit 2
+}
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
     log "已有同步任务在运行，本次跳过"
@@ -122,9 +128,16 @@ fi
 # ---------- 4. 校验：远端逐 ref 比对 ----------
 MISMATCH=""
 CNB_ONLY=""
+# 先初始化：fetch 失败时下面第 5 节仍会引用这两个变量，
+# set -u 下未定义变量会让脚本中途退出，报告被截断。
+ORIGIN_REFS=""
+CNB_REFS=""
 if [ "$FETCH_OK" = "1" ]; then
     ORIGIN_REFS="$(git ls-remote --heads --tags "$ORIGIN_REMOTE" 2>/dev/null)"
     CNB_REFS="$(git ls-remote --heads --tags "$CNB_REMOTE" 2>/dev/null)"
+    if [ -z "$ORIGIN_REFS" ]; then
+        anomaly "无法读取 $ORIGIN_REMOTE 的远端引用（凭据或网络问题），本次未做任何校验"
+    fi
     if [ -z "$CNB_REFS" ]; then
         anomaly "无法读取 $CNB_REMOTE 的远端引用（凭据或网络问题）"
     else
@@ -146,7 +159,9 @@ if [ "$FETCH_OK" = "1" ]; then
             ref="${line#*[[:space:]]}"
             ref="${ref#*	}"
             case "$ref" in refs/tags/*) continue ;; esac
-            if ! grep -qF "$ref" <<<"$ORIGIN_REFS"; then
+            # 精确整行匹配：grep -F 是子串匹配，"refs/heads/feature" 会命中
+            # "refs/heads/feature/x"，让本该清理的陈旧分支永远留在 CNB。
+            if ! awk -v r="$ref" '$2 == r {found=1} END {exit !found}' <<<"$ORIGIN_REFS"; then
                 CNB_ONLY="${CNB_ONLY}${ref#refs/heads/} "
             fi
         done <<<"$CNB_REFS"
@@ -179,6 +194,7 @@ if [ "$FETCH_OK" = "1" ] && [ -n "$CNB_ONLY" ]; then
             continue
         fi
         merged=0
+        cherry_failed=0
         for base_sha in "$ORIGIN_MAIN_SHA" "$ORIGIN_DEVELOP_SHA"; do
             [ -z "$base_sha" ] && continue
             git cat-file -e "$base_sha^{commit}" 2>/dev/null || continue
@@ -189,12 +205,25 @@ if [ "$FETCH_OK" = "1" ] && [ -n "$CNB_ONLY" ]; then
             # 祖先关系是 SHA 级的：被 cherry-pick / rebase 过的分支会被误判成
             # "未合并"。再用 patch-id 比对内容——git cherry 输出中若没有 "+"
             # （未出现在上游的提交），说明内容已在上游，可安全删除。
-            plus_count="$(git cherry "$base_sha" "$cnb_sha" 2>/dev/null | grep -c '^+' || true)"
+            #
+            # git cherry 失败时（对象缺失 / 浅克隆）stdout 为空，若不检查退出码，
+            # "0 个独有提交" 会被当成"内容已在上游" → 误删远端分支。失败时保守保留。
+            if ! cherry_out="$(git cherry "$base_sha" "$cnb_sha" 2>&1)"; then
+                cherry_failed=1
+                break
+            fi
+            plus_count="$(grep -c '^+' <<<"$cherry_out" || true)"
             if [ "$plus_count" = "0" ]; then
                 merged=1
                 break
             fi
         done
+        if [ "$cherry_failed" = "1" ]; then
+            KEPT_BRANCHES="${KEPT_BRANCHES}${branch}(cherry失败) "
+            anomaly "分支 $branch 的 git cherry 判定失败（对象缺失或浅克隆），保守保留不删除"
+            log "  = 保留 $branch（git cherry 判定失败，不删除）"
+            continue
+        fi
         if [ "$merged" = "1" ]; then
             if git push "$CNB_REMOTE" --delete "$branch" >/dev/null 2>&1; then
                 DELETED_BRANCHES="${DELETED_BRANCHES}${branch} "

@@ -87,7 +87,9 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::verifying"
-          git ls-remote --heads --tags cnb | sort > /tmp/cnb-refs.txt
+          # CNB 自己会推一条 ci/reports 分支（.cnb.yml 的 CI 产物），GitHub 侧没有，
+          # 直接 diff 会让校验永远失败——比对前先剔除这条 CNB 自有分支。
+          git ls-remote --heads --tags cnb | grep -v 'refs/heads/ci/reports$' | sort > /tmp/cnb-refs.txt
           git ls-remote --heads --tags origin | sort > /tmp/origin-refs.txt
           if ! diff -u /tmp/origin-refs.txt /tmp/cnb-refs.txt; then
             echo "::error::CNB 与 origin 的引用仍不一致，请人工介入"
