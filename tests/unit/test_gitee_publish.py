@@ -56,7 +56,9 @@ def gitee() -> GiteeMock:
 def _env(mock: GiteeMock, shim: Path) -> dict[str, str]:
     env = dict(os.environ)
     env["GITEE_API_BASE"] = mock.api_base
+    env["GITHUB_API_BASE"] = mock.github_api_base
     env["GITEE_TOKEN"] = "test-token"
+    env["GH_TOKEN"] = "test-token"
     env["PATH"] = f"{shim}{os.pathsep}{env.get('PATH', '')}"
     return env
 
@@ -255,6 +257,102 @@ def test_a_missing_repository_leaves_nothing_behind(
 
     assert result.returncode != 0
     assert not mock.releases
+
+
+# -- the whole script, GitHub side included ----------------------------------
+PUBLISH_FROM_GITHUB = GITEE_DIR / "publish_from_github.sh"
+
+
+@needs_bash
+def _publish_from_github(
+    mock: GiteeMock, shim: Path, tmp_path: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            bash,
+            str(PUBLISH_FROM_GITHUB),
+            "--tag",
+            TAG,
+            "--source-repo",
+            "owner/Octop",
+            "--owner",
+            OWNER,
+            "--repo",
+            REPO,
+            "--work-dir",
+            str(tmp_path / "work"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_env(mock, shim),
+        timeout=300,
+        check=False,
+    )
+
+
+@needs_bash
+def test_the_whole_publish_script_runs_end_to_end(
+    gitee: GiteeMock, python3_shim: Path, tmp_path: Path
+) -> None:
+    """Download the assets, build the notes, sync the page, create the release."""
+    gitee.set_github_asset("Octop-desktop-windows-amd64-1.5.0.exe", b"x" * 2048)
+    gitee.set_github_asset("Octop-video-components-windows-x64-1.5.0.exe", b"y" * 1024)
+
+    result = _publish_from_github(gitee, python3_shim, tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    created = gitee.calls("POST", "/releases")
+    assert len(created) == 1
+    payload = _json(created[0]["body"])
+    assert payload["tag_name"] == TAG
+    assert payload["target_commitish"]
+    assert "Octop-desktop-windows-amd64-1.5.0.exe" in payload["body"]
+    # The download page was pushed for this tag.
+    assert TAG in gitee.page_text()
+
+
+@needs_bash
+def test_a_truncated_download_is_refused(
+    gitee: GiteeMock, python3_shim: Path, tmp_path: Path
+) -> None:
+    """A half-downloaded installer must never reach Gitee."""
+    gitee.set_github_asset("Octop-desktop-windows-amd64-1.5.0.exe", b"x" * 100, reported_size=2048)
+
+    result = _publish_from_github(gitee, python3_shim, tmp_path)
+
+    assert result.returncode != 0
+    assert "truncated" in (result.stdout + result.stderr)
+    assert not gitee.releases
+
+
+@needs_bash
+def test_a_missing_asset_is_refused(gitee: GiteeMock, python3_shim: Path, tmp_path: Path) -> None:
+    """A 404 must abort the download instead of saving the error page."""
+    gitee.set_github_asset("Octop-desktop-windows-amd64-1.5.0.exe", b"x" * 2048)
+    # The release promises an asset the server does not serve.
+    gitee.github_missing.add("Octop-video-components-windows-x64-1.5.0.exe")
+
+    result = _publish_from_github(gitee, python3_shim, tmp_path)
+
+    assert result.returncode != 0
+    assert not gitee.releases
+
+
+@needs_bash
+def test_the_tag_is_found_beyond_the_first_page(
+    gitee: GiteeMock, python3_shim: Path, tmp_path: Path
+) -> None:
+    """The tag list is paginated — a tag on page 2 still counts as existing."""
+    gitee.tags = [f"v1.0.{index}" for index in range(120)]
+    gitee.tags.append(TAG)
+    gitee.set_github_asset("Octop-desktop-windows-amd64-1.5.0.exe", b"x" * 2048)
+
+    result = _publish_from_github(gitee, python3_shim, tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(gitee.releases) == 1
 
 
 def _json(raw: str) -> dict:

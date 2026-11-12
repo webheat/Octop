@@ -34,6 +34,9 @@
 - Gitee 复用已有 Release 但下载页 commit 变了时会明确告警：Gitee 无法移动已存在的 tag，再发一次并不会让页面更新，需要换一个新 tag
 - Gitee Release 说明的正文按 LF 归一化：Windows 上写出的说明文件原本会带着 CRLF 原样传到 Gitee
 - 发版技能的 `REMOTE` 默认值改为 `fork`：本仓库的 `origin` 指向上游 TencentCloud/Octop（只读，推送会被拒），照原值走流程会卡在推送这一步
+- Gitee 发布：下载 GitHub Release 附件时加上 `--fail` 并校验实际字节数——此前一个 404 会被当成附件存下来，截断的下载也会照传，最后变成 Gitee 上一个装不上的安装器
+- Gitee 发布：查 tag 是否存在时翻页（此前只取第一页，仓库 tag 多时会把已存在的 tag 当成不存在）；附件大小上限与 `assets.py` 对齐（正好 100 MB 的附件两处语义不一致）
+- Gitee 发布：Release 说明里的下载地址与 GitHub 上传地址改为可配置（`GITHUB_DOWNLOAD_BASE` / `GITEE_DOWNLOAD_BASE` / `GITHUB_REPOSITORY` / `GITHUB_UPLOAD_HOST`），此前写死，换仓库或指向本地假服务器都会失效
 
 ## [1.4.0] - 2026-11-01
 

@@ -27,6 +27,22 @@ TAGS_RE = re.compile(r"^/api/v5/repos/[^/]+/[^/]+/tags$")
 RELEASES_RE = re.compile(r"^/api/v5/repos/[^/]+/[^/]+/releases$")
 RELEASE_ID_RE = re.compile(r"^/api/v5/repos/[^/]+/[^/]+/releases/(?P<rid>\d+)$")
 ATTACH_RE = re.compile(r"^/api/v5/repos/[^/]+/[^/]+/releases/(?P<rid>\d+)/attach_files$")
+# The GitHub side of the mock: the release metadata and the asset bytes.
+GH_RELEASE_RE = re.compile(r"^/gh/repos/[^/]+/[^/]+/releases/tags/(?P<tag>.+)$")
+GH_DOWNLOAD_RE = re.compile(r"^/gh/download/(?P<name>.+)$")
+
+
+def _page(tags: list[str], path: str) -> list[dict[str, str]]:
+    """One page of the tag list, honouring ``?per_page=&page=``."""
+    query = path.partition("?")[2]
+    params = dict(part.partition("=")[::2] for part in query.split("&") if "=" in part)
+    try:
+        per_page = max(1, int(params.get("per_page", "30")))
+        page = max(1, int(params.get("page", "1")))
+    except ValueError:
+        per_page, page = 30, 1
+    start = (page - 1) * per_page
+    return [{"name": tag} for tag in tags[start : start + per_page]]
 
 
 def _sha(seed: str) -> str:
@@ -51,10 +67,44 @@ class GiteeMock:
         self.files: dict[str, dict[str, str]] = {}
         self.releases: dict[str, dict[str, Any]] = {}
         self.tags: list[str] = []
+        # GitHub side: the asset bytes the mock serves and the sizes it reports.
+        self.github_assets: dict[str, bytes] = {}
+        self.github_sizes: dict[str, int] = {}
+        # Assets the release promises but the server does not serve (404).
+        self.github_missing: set[str] = set()
         self._next_id = 1000
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+
+    # -- GitHub side -----------------------------------------------------------
+    def set_github_asset(self, name: str, data: bytes, reported_size: int | None = None) -> None:
+        """Serve ``data`` for ``name``; report ``reported_size`` bytes.
+
+        A reported size larger than the served bytes simulates a truncated
+        download.
+        """
+        self.github_assets[name] = data
+        self.github_sizes[name] = len(data) if reported_size is None else reported_size
+
+    def github_release(self, tag: str) -> dict[str, Any]:
+        assets = [
+            {
+                "name": name,
+                "size": self.github_sizes.get(name, len(data)),
+                "browser_download_url": f"{self.web_base}/gh/download/{name}",
+            }
+            for name, data in sorted(self.github_assets.items())
+        ]
+        assets += [
+            {
+                "name": name,
+                "size": 2048,
+                "browser_download_url": f"{self.web_base}/gh/download/{name}",
+            }
+            for name in sorted(self.github_missing)
+        ]
+        return {"tag_name": tag, "body": f"Octop {tag}", "assets": assets}
 
     # -- lifecycle ------------------------------------------------------------
     def __enter__(self) -> GiteeMock:
@@ -151,7 +201,27 @@ class GiteeMock:
                     return
 
                 if TAGS_RE.match(path):
-                    self._send(200, [{"name": tag} for tag in mock.tags])
+                    self._send(200, _page(mock.tags, path))
+                    return
+
+                # GitHub side, so the whole publish script can be driven.
+                match = GH_RELEASE_RE.match(path)
+                if match:
+                    self._send(200, mock.github_release(match.group("tag")))
+                    return
+
+                match = GH_DOWNLOAD_RE.match(path)
+                if match:
+                    name = match.group("name")
+                    data = mock.github_assets.get(name)
+                    if data is None:
+                        self._send(404, {"message": "Not Found", "path": path})
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
                     return
 
                 self._send(404, {"message": "Not Found", "path": path})
@@ -288,6 +358,11 @@ class GiteeMock:
     @property
     def web_base(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+    @property
+    def github_api_base(self) -> str:
+        """The base the scripts use for the GitHub side (``GITHUB_API_BASE``)."""
+        return f"{self.web_base}/gh"
 
     def page_text(self) -> str:
         """The download page as it now sits in the mock repository."""

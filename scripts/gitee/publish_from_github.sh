@@ -86,12 +86,23 @@ if [[ -z "$assets" ]]; then
   exit 1
 fi
 
-while IFS=$'\t' read -r name url; do
+while IFS=$'\t' read -r name size url; do
   [[ -n "$name" ]] || continue
   name="${name%$'\r'}"
+  size="${size%$'\r'}"
   url="${url%$'\r'}"
   echo "  downloading ${name}"
-  curl -sSL --max-time 1800 -H "Authorization: Bearer ${gh_token}" -o "${assets_dir}/${name}" "$url"
+  # --fail: without it a 404 would be saved as the asset itself — a page of
+  # HTML that later gets uploaded to Gitee as if it were the installer.
+  curl -sSL --fail --max-time 1800 -H "Authorization: Bearer ${gh_token}" \
+    -o "${assets_dir}/${name}" "$url"
+  # A truncated download would be uploaded as a broken installer. The size the
+  # GitHub API reported is the contract.
+  actual="$(wc -c < "${assets_dir}/${name}" | tr -d ' ')"
+  if [[ -n "$size" && "$size" != "0" && "$actual" != "$size" ]]; then
+    echo "::error::${name} is truncated: expected ${size} bytes, got ${actual}" >&2
+    exit 1
+  fi
 done <<< "$assets"
 
 # --- 2. the release notes ---------------------------------------------------

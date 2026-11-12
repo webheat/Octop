@@ -193,13 +193,26 @@ if [[ -n "$release_id" ]]; then
 else
   # The tag may already exist (pushed over SSH). Creating a release then
   # creates the tag as well, so only pass a target when the tag is missing.
+  #
+  # The tag list is paginated — a repository with many tags would otherwise
+  # hide the one we care about on the first page.
   tag_exists="no"
-  response="$(api GET "/repos/${owner}/${repo}/tags")"
-  if [[ "$(printf '%s' "$response" | status_of)" == "200" ]]; then
-    if printf '%s' "$response" | body_of | python3 -c 'import json,sys; sys.exit(0 if any(t.get("name")==sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)' "$tag"; then
-      tag_exists="yes"
+  page=1
+  while [[ "$page" -le 100 ]]; do
+    response="$(api GET "/repos/${owner}/${repo}/tags?per_page=100&page=${page}")"
+    if [[ "$(printf '%s' "$response" | status_of)" != "200" ]]; then
+      break
     fi
-  fi
+    tags_body="$(printf '%s' "$response" | body_of)"
+    require_json "$tags_body" "the tag list"
+    if printf '%s' "$tags_body" | python3 -c 'import json,sys; sys.exit(0 if any(t.get("name")==sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)' "$tag"; then
+      tag_exists="yes"
+      break
+    fi
+    count="$(printf '%s' "$tags_body" | python3 -c 'import json,sys; print(len(json.load(sys.stdin) or []))')"
+    [[ "$count" -eq 0 ]] && break
+    page=$((page + 1))
+  done
 
   target="$base_sha"
   if [[ -z "$target" && "$tag_exists" != "yes" ]]; then
@@ -235,7 +248,9 @@ for path in "$assets_dir"/*; do
   [[ -f "$path" ]] || continue
   name="$(basename "$path")"
   size="$(wc -c < "$path" | tr -d ' ')"
-  if [[ "$size" -gt "$max_bytes" ]]; then
+  # The limit is "smaller than the cap", same as assets.py: an attachment of
+  # exactly 100 MB does not fit either.
+  if [[ "$size" -ge "$max_bytes" ]]; then
     skipped+=("${name} ($((size / 1024 / 1024)) MB)")
     continue
   fi

@@ -16,6 +16,12 @@ name="${3:-}"
 }
 name="${name:-$(basename "$path")}"
 
+# The repository and the upload host are configurable: the hardcoded ones
+# break as soon as the release lives somewhere else.
+repo="${GITHUB_REPOSITORY:-zhuimeng2026-hub/Octop}"
+upload_host="${GITHUB_UPLOAD_HOST:-https://uploads.github.com}"
+encoded_name="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$name")"
+
 gh_token="${GH_TOKEN:-}"
 if [[ -z "$gh_token" && -f "${HOME}/.github_token" ]]; then
   gh_token="$(head -1 "${HOME}/.github_token" | tr -d '[:space:]')"
@@ -35,19 +41,21 @@ fi
 
 size="$(wc -c < "$path" | tr -d ' ')"
 echo "Uploading ${name} ($((size / 1024 / 1024)) MB)"
-code="$(curl -s -o /tmp/asset_upload.out -w "%{http_code}" --max-time 3600 \
+upload_out="$(mktemp)"
+trap 'rm -f "$upload_out"' EXIT
+code="$(curl -s -o "$upload_out" -w "%{http_code}" --max-time 3600 \
   -X POST \
   -H "Authorization: Bearer ${gh_token}" \
   -H "Content-Type: application/octet-stream" \
   --data-binary "@${path}" \
-  "https://uploads.github.com/repos/zhuimeng2026-hub/Octop/releases/${release_id}/assets?name=${name}")"
+  "${upload_host}/repos/${repo}/releases/${release_id}/assets?name=${encoded_name}")"
 if [[ "$code" != "201" && "$code" != "200" ]]; then
   echo "::error::upload failed (HTTP ${code})" >&2
-  head -c 400 /tmp/asset_upload.out >&2
+  head -c 400 "$upload_out" >&2
   exit 1
 fi
 python3 -c "
 import json,sys
-d=json.load(open('/tmp/asset_upload.out'))
+d=json.load(open(sys.argv[1]))
 print('  ✓ %s  %s  browser_download=%s' % (d.get('name'), d.get('size'), d.get('browser_download_url')))
-" 2>/dev/null || head -c 200 /tmp/asset_upload.out
+" "$upload_out" 2>/dev/null || head -c 200 "$upload_out"
