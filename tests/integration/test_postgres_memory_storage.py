@@ -144,7 +144,7 @@ def test_cleanup_is_scoped_backed_up_and_other_expert_remains_writable(stores, t
     assert report["candidates_deleted"] == report["journal_deleted"] == 1
     assert not report["physical_space_reclaimed"]
     assert phases == ["inspecting", "backing_up", "cleaning"]
-    lines = [json.loads(line) for line in backup.read_text().splitlines()]
+    lines = [json.loads(line) for line in backup.read_text(encoding="utf-8").splitlines()]
     assert lines[0]["namespace"] == first._ns and lines[0]["rows"] == 2
     assert {line["table"] for line in lines[1:]} == {"candidates", "journal"}
     assert all(line["row"]["namespace"] == first._ns for line in lines[1:])
@@ -203,7 +203,7 @@ def test_sql_failure_rolls_back_both_tables_and_retains_backup(stores, tmp_path)
         with pytest.raises(errors.RaiseException, match="test rollback"):
             storage.maintain_postgres_storage(first, backup=backup, progress=lambda _: None)
         assert (snapshot(first), snapshot(second)) == before
-        assert len(backup.read_text().splitlines()) == 3
+        assert len(backup.read_text(encoding="utf-8").splitlines()) == 3
     finally:
         with storage._connect(first) as conn, conn.cursor() as cur:
             cur.execute(

@@ -20,6 +20,8 @@
 - GitHub → CNB 镜像（Actions）：校验比对剔除 CNB 自有的 `ci/reports` 分支，此前该分支让每次镜像都判红
 - 新增 `.gitattributes` 固定 `*.sh` 为 LF 行尾：Windows 检出（`core.autocrlf=true`）曾把 shell 脚本写成 CRLF，在严格 bash（WSL）下直接语法报错，也可能被原样拷到 Linux 服务器上跑不起来
 - 飞牛打包资产（`fnos/docker/manifest`、`fnos/native/manifest`、`fnos/docker/app/docker/docker-compose.yaml`）的版本号此前停在 1.2.0，与 `pyproject.toml` 的 1.4.0 不一致，商店与镜像标签都会带错版本——现与项目版本对齐
+- Windows 测试可移植性：入口脚本测试改为优先使用 Git Bash（PATH 上的 `bash` 在 Windows 上可能是 WSL 启动器，无法按 Windows 路径打开脚本）；vendor-wheels 用例按其原有声明标记为 POSIX-only
+- 测试读取仓库文件时显式指定 `encoding="utf-8"`：中文 Windows 上默认编码是 GBK，读取含中文的 SQL 迁移会直接报 `UnicodeDecodeError`
 
 ## [1.4.0] - 2026-11-01
 

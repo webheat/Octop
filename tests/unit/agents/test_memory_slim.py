@@ -254,7 +254,7 @@ async def test_local_control_authenticates_and_streams_completion(tmp_path):
         assert events[-1]["phase"] == "failed"
         assert coordinator.task is None
         host.app_runtime = SimpleNamespace(agent_registry=registry)
-        endpoint = json.loads((tmp_path / "memory-slim-control.json").read_text())
+        endpoint = json.loads((tmp_path / "memory-slim-control.json").read_text(encoding="utf-8"))
         reader, writer = await asyncio.open_connection("127.0.0.1", endpoint["port"])
         writer.write(b'{"token":"wrong","agent_id":"a"}\n')
         await writer.drain()
@@ -404,7 +404,7 @@ async def test_control_discovery_and_heartbeat_during_unchanged_phase(tmp_path, 
         agents = await asyncio.to_thread(list_memory_slim_agents, tmp_path)
         assert agents == [{"agent_id": "a", "name": "助手"}]
         assert coordinator.task is None
-        endpoint = json.loads((tmp_path / "memory-slim-control.json").read_text())
+        endpoint = json.loads((tmp_path / "memory-slim-control.json").read_text(encoding="utf-8"))
         reader, writer = await asyncio.open_connection("127.0.0.1", endpoint["port"])
         writer.write((json.dumps({"token": endpoint["token"], "agent_id": "a"}) + "\n").encode())
         await writer.drain()
