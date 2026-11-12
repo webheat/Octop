@@ -6,23 +6,31 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-12
+
 ### 新增
+- Windows 客户端 slim/thin 外壳与 Gitee 发布通道：完整安装器 200–340 MB 超过 Gitee 单附件 100 MB 上限，改为 slim 变体首启从 CDN 拉运行时，并打通 Gitee 发布通道
+- 用户权限按页签勾选与 Chat 流式渲染节流：权限选择按页签分组、支持整组与单页折叠勾选；token / reasoning 增量合并到 50ms 一次绘制，不再每片都触发 React 渲染
 - Gitee 发布链的端到端测试（`tests/unit/test_gitee_publish.py` + `tests/support/gitee_mock.py`）：这条链此前从未在 CI 里跑过，失败模式全靠人肉记忆。现在用本地假 Gitee API 覆盖了正常路径（stdout 只有 sha、target_commitish 干净、正文未被污染、重复发布幂等）与四条失败路径（令牌被拒、仓库不存在、页面残留旧 tag、tag 移不动）
 
 ### 修复
+- 历史刷新不再被粘住的 isStreaming 冻结：断线后 isStreaming 不会自行复位，会让下拉刷新与强制重载一直卡住；现在只在 socket 仍连接、且确实还有内容在生成时才拦截
 - 升级 `octop-harness` 到 1.0.5：子进程输出改为在 `execute()` 内解码（`decode_child_output`），Octop 不再替换 stdlib `subprocess`；DeepSeek 快速档的模型 id 由 `deepseek-v4-flash` 更名为 `deepseek-flash`
 - 部署同步：产物比 `dashboard/src` 旧时中止同步，不再把线上更新的前端回滚成旧版本（`OCTOP_DEPLOY_ALLOW_STALE=1` 可放行）
 - 部署同步：本机无 rsync 走 scp 回退时，先校验远端临时目录里有 `index.html` 才做镜像，远端缺 rsync 时明确报错——不再有拿空目录 `rsync --delete` 清空线上前端的路径
 - 部署同步：`-Restart` 精确匹配 `octop.service`，不再误选 `octop-watchdog.service` 把看门狗当服务重启
 - 部署同步：`-DryRun` 预览与 `-NoDelete` 行为一致；远端入口 hash 校验只认匹配 `assets/index.*.js` 的行，ssh 的 stderr 混入不再造成误判
+- 部署脚本的远端载荷改走 stdin，避免备份被静默跳过
 - GitHub → Gitee 发布：`push_readme.py` 的进度输出改到 stderr，stdout 只剩 commit sha——此前多行输出会把 Gitee Release 的 `target_commitish` 写成垃圾值，Actions 里还会因 `Invalid format` 直接失败
 - GitHub → Gitee 发布：Release 说明里的下载链接此前写死 `webheat/octop_client`，现按实际 `--owner` / `--repo` 生成
-- GitHub → CNB 镜像：`git cherry` 判定失败（对象缺失、浅克隆）时不再当成"内容已并入上游"而误删远端分支，改为保守保留并记录异常
+- GitHub → CNB 镜像：`git cherry` 判定失败（对象缺失、浅克隆）时不再当成“内容已并入上游”而误删远端分支，改为保守保留并记录异常
 - GitHub → CNB 镜像：陈旧分支判定由子串匹配改为整行精确匹配，`refs/heads/feature` 不再命中 `refs/heads/feature/x`
 - GitHub → CNB 镜像：缺少 `flock` 时不再静默 exit 0（cron 误判为同步成功，实际什么都没同步）；`ls-remote` 失败时显式记异常；fetch 失败不再让报告因未定义变量而截断
 - GitHub → CNB 镜像（Actions）：校验比对剔除 CNB 自有的 `ci/reports` 分支，此前该分支让每次镜像都判红
+- 同步脚本不再写死 claude CLI 的 nvm 版本路径
+- 锁文件根包版本与 pyproject 对齐，消除每次 uv run 的重解析
+- 飞牛打包资产（`fnos/docker/manifest`、`fnos/native/manifest`、`fnos/docker/app/docker/docker-compose.yaml`）的版本号此前停在 1.2.0，与 `pyproject.toml` 不一致，商店与镜像标签都会带错版本——现与项目版本对齐
 - 新增 `.gitattributes` 固定 `*.sh` 为 LF 行尾：Windows 检出（`core.autocrlf=true`）曾把 shell 脚本写成 CRLF，在严格 bash（WSL）下直接语法报错，也可能被原样拷到 Linux 服务器上跑不起来
-- 飞牛打包资产（`fnos/docker/manifest`、`fnos/native/manifest`、`fnos/docker/app/docker/docker-compose.yaml`）的版本号此前停在 1.2.0，与 `pyproject.toml` 的 1.4.0 不一致，商店与镜像标签都会带错版本——现与项目版本对齐
 - Windows 测试可移植性：入口脚本测试改为优先使用 Git Bash（PATH 上的 `bash` 在 Windows 上可能是 WSL 启动器，无法按 Windows 路径打开脚本）；vendor-wheels 用例按其原有声明标记为 POSIX-only
 - 测试读取仓库文件时显式指定 `encoding="utf-8"`：中文 Windows 上默认编码是 GBK，读取含中文的 SQL 迁移会直接报 `UnicodeDecodeError`
 - Gitee 下载页改为按本次发布的 tag / owner / repo 渲染：此前页面里写死了上一版的 tag 与安装器文件名，发新版本时用户会从新 Release 页面下到旧安装器，而且因为内容与线上完全一致、连一次提交都不会产生，全程没有任何报错；现在渲染后若页面仍指向别的 tag 或版本，发布直接中止并点名是哪一个
@@ -37,6 +45,11 @@
 - Gitee 发布：下载 GitHub Release 附件时加上 `--fail` 并校验实际字节数——此前一个 404 会被当成附件存下来，截断的下载也会照传，最后变成 Gitee 上一个装不上的安装器
 - Gitee 发布：查 tag 是否存在时翻页（此前只取第一页，仓库 tag 多时会把已存在的 tag 当成不存在）；附件大小上限与 `assets.py` 对齐（正好 100 MB 的附件两处语义不一致）
 - Gitee 发布：Release 说明里的下载地址与 GitHub 上传地址改为可配置（`GITHUB_DOWNLOAD_BASE` / `GITEE_DOWNLOAD_BASE` / `GITHUB_REPOSITORY` / `GITHUB_UPLOAD_HOST`），此前写死，换仓库或指向本地假服务器都会失效
+
+### 变更
+- 文档：新增 CNB 镜像链路与 CNB Open API 调用约定、superagent 远程部署说明、项目待办清单；浏览器实测手册补充分层诊断法与首轮实测记录；bridge 的 6 处失效图片引用改为文字图注；中文 agent 库文档修正 5 处笔误
+- CHANGELOG 恢复上游 1.0.3b1 版本记录
+- 主干 v1.4.0 回流 develop，修复 main 非 develop 祖先的违规状态
 
 ## [1.4.0] - 2026-11-01
 
