@@ -27,10 +27,10 @@ Windows build only; macOS and Linux are not published yet.
 
 | System | Download | Size |
 |---|---|---|
-| Windows 10/11 x64 | [Octop-desktop-windows-amd64-1.4.0.exe](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-desktop-windows-amd64-1.4.0.exe) | ~6 MB |
-| Windows on ARM (Snapdragon X and similar) | [Octop-desktop-windows-arm64-1.4.0.exe](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-desktop-windows-arm64-1.4.0.exe) | ~5.5 MB |
+| Windows 10/11 x64 | [Octop-desktop-windows-amd64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-amd64-{{VERSION}}.exe) | ~6 MB |
+| Windows on ARM (Snapdragon X and similar) | [Octop-desktop-windows-arm64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-arm64-{{VERSION}}.exe) | ~5.5 MB |
 
-Every release is listed under [Releases](https://gitee.com/webheat/octop_client/releases).
+Every release is listed under [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases).
 The client talks to <https://ocbot.aixifs.com/videogen> directly.
 
 ## 2. Video components (required)
@@ -42,7 +42,7 @@ editing — only local video production.
 
 | Component | Size | Download |
 |---|---|---|
-| **Video components (Windows x64)** | ~71 MB | [Download](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-video-components-windows-x64-1.4.0.exe) |
+| **Video components (Windows x64)** | ~71 MB | [Download]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-video-components-windows-x64-{{VERSION}}.exe) |
 
 Install steps:
 

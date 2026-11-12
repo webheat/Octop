@@ -98,7 +98,8 @@ octop_client/                ← Gitee：只有 README.md / README.en.md（下�
 GitHub / CNB。
 
 下载页由 `scripts/gitee/push_readme.py` 通过 Gitee contents API 写入（CI 里不需要
-SSH 密钥），**内容没变就不产生新 commit**；Release 的 tag 指向下载页所在的 commit，
+SSH 密钥）。内容是**按本次发布渲染的模板**（见上面"分步执行"下面的说明），
+**内容没变就不产生新 commit**；Release 的 tag 指向下载页所在的 commit，
 所以 Release 页面看到的是一份可读的下载页，而不是一个无关的初始提交。
 
 ### 2. 仓库 Secrets
@@ -163,14 +164,20 @@ export GITEE_TOKEN=...
 
 # 1. 同步下载页，拿到 commit
 sha="$(python3 scripts/gitee/push_readme.py \
-  --owner webheat --repo octop_client --token "$GITEE_TOKEN")"
+  --owner webheat --repo octop_client --tag v1.4.0-gitee.1 --token "$GITEE_TOKEN")"
 
 # 2. 建 Release 并上传
 scripts/gitee/publish_release.sh \
-  --tag v1.4.0 --owner webheat --repo octop_client --token "$GITEE_TOKEN" \
+  --tag v1.4.0-gitee.1 --owner webheat --repo octop_client --token "$GITEE_TOKEN" \
   --assets-dir release-assets --body-file release-notes.md \
   --base-sha "$sha"
 ```
+
+> **下载页是模板，必须传 `--tag`。** `REPO_README*.md` 里的下载链接写成
+> `{{TAG}}` / `{{VERSION}}` / `{{OWNER}}` / `{{REPO}}` / `{{GITEE_WEB}}` 占位符，
+> 由 `push_readme.py` 按本次发布渲染。渲染后如果页面里还出现**别的** tag 或版本号，
+> 脚本直接中止并点名是哪一个 —— 否则新 Release 的页面会安静地指向旧安装器，
+> 而因为内容与线上完全一致，连一次提交都不会产生，根本看不出来。
 
 ## 五、限制与注意事项
 

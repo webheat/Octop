@@ -21,10 +21,10 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 
 | 系统 | 下载 | 体积 |
 |---|---|---|
-| Windows 10/11 x64 | [Octop-desktop-windows-amd64-1.4.0.exe](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-desktop-windows-amd64-1.4.0.exe) | ~6 MB |
-| Windows on ARM（骁龙本等） | [Octop-desktop-windows-arm64-1.4.0.exe](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-desktop-windows-arm64-1.4.0.exe) | ~5.5 MB |
+| Windows 10/11 x64 | [Octop-desktop-windows-amd64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-amd64-{{VERSION}}.exe) | ~6 MB |
+| Windows on ARM（骁龙本等） | [Octop-desktop-windows-arm64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-arm64-{{VERSION}}.exe) | ~5.5 MB |
 
-全部发行版本见 [Releases](https://gitee.com/webheat/octop_client/releases)。
+全部发行版本见 [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases)。
 远程版打开后直连 <https://ocbot.aixifs.com/videogen>。
 
 ## 2. 视频制作组件（必装）
@@ -34,7 +34,7 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 
 | 组件 | 体积 | 下载 |
 |---|---|---|
-| **视频制作组件（Windows x64）** | ~71 MB | [下载](https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-video-components-windows-x64-1.4.0.exe) |
+| **视频制作组件（Windows x64）** | ~71 MB | [下载]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-video-components-windows-x64-{{VERSION}}.exe) |
 
 安装步骤：
 

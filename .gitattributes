@@ -4,3 +4,11 @@
 # checkout (Git Bash or WSL). A stray CR turns "do" into "do\r" and breaks the
 # parser, so the line ending has to be pinned rather than left to core.autocrlf.
 *.sh text eol=lf
+
+# Markdown keeps LF as well: scripts/gitee/REPO_README*.md are pushed to the
+# Gitee repository verbatim, and a Windows checkout would otherwise make the
+# download page look "changed" on every release.
+*.md text eol=lf
+
+# This file itself, so the rules above stay readable on every platform.
+.gitattributes text eol=lf

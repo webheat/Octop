@@ -144,6 +144,7 @@ jobs:
           sha="$(python3 scripts/gitee/push_readme.py \
             --owner "${{ inputs.gitee_owner }}" \
             --repo "${{ inputs.gitee_repo }}" \
+            --tag "${{ inputs.tag }}" \
             --token "${GITEE_TOKEN}" | tail -1)"
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 

@@ -22,6 +22,9 @@
 - 飞牛打包资产（`fnos/docker/manifest`、`fnos/native/manifest`、`fnos/docker/app/docker/docker-compose.yaml`）的版本号此前停在 1.2.0，与 `pyproject.toml` 的 1.4.0 不一致，商店与镜像标签都会带错版本——现与项目版本对齐
 - Windows 测试可移植性：入口脚本测试改为优先使用 Git Bash（PATH 上的 `bash` 在 Windows 上可能是 WSL 启动器，无法按 Windows 路径打开脚本）；vendor-wheels 用例按其原有声明标记为 POSIX-only
 - 测试读取仓库文件时显式指定 `encoding="utf-8"`：中文 Windows 上默认编码是 GBK，读取含中文的 SQL 迁移会直接报 `UnicodeDecodeError`
+- Gitee 下载页改为按本次发布的 tag / owner / repo 渲染：此前页面里写死了上一版的 tag 与安装器文件名，发新版本时用户会从新 Release 页面下到旧安装器，而且因为内容与线上完全一致、连一次提交都不会产生，全程没有任何报错；现在渲染后若页面仍指向别的 tag 或版本，发布直接中止并点名是哪一个
+- Gitee 发布链：401 / 403 不再与 404 同路径（此前令牌过期被报成"Release 不存在"，真因被掩盖），改为明确提示令牌需要 projects 权限；附件上传失败会打印 Gitee 的错误正文，响应体不是合法 JSON 时明确指出是哪个 API 失败而不是静默退出
+- Gitee 下载页按行尾无关的方式比对内容：Windows 检出（`core.autocrlf=true`）曾让页面每次都被判定"内容变了"，与 CI 互相翻转仓库里的 README
 
 ## [1.4.0] - 2026-11-01
 

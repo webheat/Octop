@@ -80,6 +80,11 @@ if [[ -n "$body_file" ]]; then
   body="$(cat "$body_file")"
 fi
 
+# Scratch file for the response body of an attachment upload — Gitee's error
+# message is the only clue when an upload is rejected.
+attach_body="$(mktemp)"
+trap 'rm -f "$attach_body"' EXIT
+
 api() {
   # api <method> <path> [curl args...]
   local method="$1"
@@ -113,15 +118,49 @@ body_of() {
   sed '$d'
 }
 
+require_json() {
+  # A broken body must say so. Parsing it inside a command substitution would
+  # abort the script through `set -e` without naming the API that failed.
+  local body="$1" what="$2"
+  if [[ -z "${body//[[:space:]]/}" ]]; then
+    echo "::error::the Gitee API returned an empty body for ${what}" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$body" | python3 -c 'import json,sys; json.loads(sys.stdin.read() or "null")' 2>/dev/null; then
+    echo "::error::the Gitee API returned a non-JSON body for ${what}: ${body:0:200}" >&2
+    exit 1
+  fi
+}
+
 # --- 1. find the release (Gitee answers 200 with a null body when the tag
 #        exists but has no release yet) -------------------------------------
 release_id=""
 existing_assets=""
 response="$(api GET "/repos/${owner}/${repo}/releases/tags/${tag}")"
-if [[ "$(printf '%s' "$response" | status_of)" == "200" ]]; then
-  release_id="$(printf '%s' "$response" | body_of | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("id",""))')"
-  existing_assets="$(printf '%s' "$response" | body_of | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print("\n".join(a["name"] for a in d.get("assets",[])))')"
-fi
+status="$(printf '%s' "$response" | status_of)"
+case "$status" in
+  200)
+    release_body="$(printf '%s' "$response" | body_of)"
+    require_json "$release_body" "the release of ${tag}"
+    release_id="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("id",""))')"
+    existing_assets="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print("\n".join(a.get("name","") for a in (d.get("assets") or [])))')"
+    ;;
+  404)
+    # No release for this tag yet — create one below.
+    ;;
+  401|403)
+    # Not "it does not exist": the token is wrong. Say so, or the real cause
+    # surfaces later as a confusing "could not create the release".
+    echo "::error::Gitee rejected the token (HTTP ${status})" >&2
+    echo "  The token needs the 'projects' permission on ${owner}/${repo}." >&2
+    exit 1
+    ;;
+  *)
+    echo "::error::cannot read the Gitee release for ${tag} (HTTP ${status})" >&2
+    printf '%s\n' "$response" | body_of >&2
+    exit 1
+    ;;
+esac
 
 if [[ -n "$release_id" ]]; then
   echo "Reusing the existing Gitee release ${release_id} for ${tag}"
@@ -179,12 +218,21 @@ for path in "$assets_dir"/*; do
     continue
   fi
   echo "Uploading ${name} ($((size / 1024 / 1024)) MB)"
-  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  # Keep curl's exit code separate from the HTTP status: a transport failure
+  # must not abort through `set -e` before the reason is printed.
+  rc=0
+  code="$(curl -sS -o "$attach_body" -w '%{http_code}' -X POST \
     -H "Authorization: token ${token}" \
     -F "file=@${path}" \
-    "${API_BASE}/repos/${owner}/${repo}/releases/${release_id}/attach_files")"
+    "${API_BASE}/repos/${owner}/${repo}/releases/${release_id}/attach_files")" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "::error::uploading ${name} failed at the transport level (curl exit ${rc})" >&2
+    exit 1
+  fi
   if [[ "$code" != "201" && "$code" != "200" ]]; then
     echo "::error::attach failed for ${name} (HTTP ${code})" >&2
+    head -c 400 "$attach_body" >&2
+    echo >&2
     exit 1
   fi
   uploaded+=("$name")

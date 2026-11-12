@@ -103,7 +103,8 @@ GH_TOKEN="${gh_token}" python3 "${REPO_ROOT}/scripts/gitee/release_notes.py" \
 sed -i 's/\r$//' "${work_dir}/release-notes.md"
 
 # --- 3. the download page ---------------------------------------------------
-sha="$(python3 "${REPO_ROOT}/scripts/gitee/push_readme.py" --owner "${owner}" --repo "${repo}" | tr -d '\r' | tail -1)"
+sha="$(python3 "${REPO_ROOT}/scripts/gitee/push_readme.py" --owner "${owner}" --repo "${repo}" \
+  --tag "${tag}" | tr -d '\r' | tail -1)"
 
 # --- 4. the release ---------------------------------------------------------
 bash "${REPO_ROOT}/scripts/gitee/publish_release.sh" \
