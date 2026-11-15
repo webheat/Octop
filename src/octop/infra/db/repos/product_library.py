@@ -19,6 +19,31 @@ def _row(row: Any, public_id: str) -> dict[str, Any] | None:
     return result
 
 
+# The description lives in its own table so AI state never changes the asset row.
+# A LEFT JOIN keeps the existing list/get contract and gives callers no-row defaults.
+_ASSET_SELECT = """
+    SELECT a.*,
+           COALESCE(d.description, '') AS ai_description,
+           COALESCE(d.tags, '[]') AS ai_tags,
+           COALESCE(d.status, 'none') AS ai_status,
+           COALESCE(d.error, '') AS ai_error,
+           COALESCE(d.model, '') AS ai_model,
+           COALESCE(d.content_hash, '') AS ai_content_hash,
+           COALESCE(d.updated_at, 0) AS ai_updated_at
+      FROM product_library_assets a
+      LEFT JOIN product_library_asset_descriptions d
+        ON d.asset_id = a.asset_id AND d.owner_user_id = a.owner_user_id
+"""
+
+
+def _asset_row(row: Any) -> dict[str, Any] | None:
+    result = _row(row, "asset_id")
+    if result is None:
+        return None
+    result["ai_tags"] = json.loads(result.get("ai_tags") or "[]")
+    return result
+
+
 class ProductLibraryRepo:
     def __init__(self, db: DatabasePool) -> None:
         self._db = db
@@ -124,19 +149,19 @@ class ProductLibraryRepo:
     def list_assets(self, owner_id: int, product_id: str) -> list[dict[str, Any]]:
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM product_library_assets WHERE owner_user_id = ? AND product_id = ? ORDER BY created_at DESC",
+                _ASSET_SELECT + " WHERE a.owner_user_id = ? AND a.product_id = ? "
+                "ORDER BY a.created_at DESC",
                 (owner_id, product_id),
             ).fetchall()
-        return [_row(row, "asset_id") or {} for row in rows]
+        return [_asset_row(row) or {} for row in rows]
 
     def get_asset(self, owner_id: int, asset_id: str) -> dict[str, Any] | None:
         with self._db.connect() as conn:
-            return _row(
+            return _asset_row(
                 conn.execute(
-                    "SELECT * FROM product_library_assets WHERE owner_user_id = ? AND asset_id = ?",
+                    _ASSET_SELECT + " WHERE a.owner_user_id = ? AND a.asset_id = ?",
                     (owner_id, asset_id),
-                ).fetchone(),
-                "asset_id",
+                ).fetchone()
             )
 
     def find_asset_by_hash(
@@ -174,6 +199,80 @@ class ProductLibraryRepo:
                 (*params, owner_id, asset_id),
             )
         return bool(cur.rowcount > 0)
+
+    def find_ready_description_by_hash(
+        self, owner_id: int, content_hash: str
+    ) -> dict[str, Any] | None:
+        """Reuse a description when the same image bytes were uploaded again."""
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM product_library_asset_descriptions "
+                "WHERE owner_user_id = ? AND content_hash = ? AND status = 'ready' LIMIT 1",
+                (owner_id, content_hash),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_description(
+        self,
+        owner_id: int,
+        asset_id: str,
+        *,
+        content_hash: str,
+        description: str,
+        tags: list[str],
+        status: str,
+        model: str,
+    ) -> None:
+        ts = now_ts()
+        with self._db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO product_library_asset_descriptions(
+                    asset_id, owner_user_id, content_hash, description, tags,
+                    status, error, model, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+                ON CONFLICT(asset_id) DO UPDATE SET
+                    content_hash = excluded.content_hash,
+                    description = excluded.description,
+                    tags = excluded.tags,
+                    status = excluded.status,
+                    error = '',
+                    model = excluded.model,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    asset_id,
+                    owner_id,
+                    content_hash,
+                    description,
+                    json.dumps(tags, ensure_ascii=False),
+                    status,
+                    model,
+                    ts,
+                    ts,
+                ),
+            )
+
+    def mark_description_failed(
+        self, owner_id: int, asset_id: str, *, error: str, model: str
+    ) -> None:
+        """Record a failure without discarding a previously good description."""
+        ts = now_ts()
+        with self._db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO product_library_asset_descriptions(
+                    asset_id, owner_user_id, content_hash, description, tags,
+                    status, error, model, created_at, updated_at
+                ) VALUES (?, ?, '', '', '[]', 'failed', ?, ?, ?, ?)
+                ON CONFLICT(asset_id) DO UPDATE SET
+                    status = 'failed',
+                    error = excluded.error,
+                    model = excluded.model,
+                    updated_at = excluded.updated_at
+                """,
+                (asset_id, owner_id, error, model, ts, ts),
+            )
 
     def create_project(
         self, owner_id: int, product_id: str, name: str, snapshot: dict[str, Any]
