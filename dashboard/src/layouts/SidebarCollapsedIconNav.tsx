@@ -23,6 +23,7 @@ export default function SidebarCollapsedIconNav({
     <>
       {items.map((item) => {
         const active = selectedKey === item.key;
+        const locked = Boolean(item.disabled);
         const showUpdateBadge =
           item.key === "admin-advanced" && role === "admin" && hasUpdate;
         return (
@@ -34,12 +35,19 @@ export default function SidebarCollapsedIconNav({
                 : item.badge
                 ? ` (${item.badge})`
                 : ""
+            }${
+              locked
+                ? ` · ${t(
+                    item.disabledReasonKey ?? "nav.videoAnalysisLockedHint",
+                  )}`
+                : ""
             }`}
             placement="right"
             mouseEnterDelay={0.2}
           >
             <button
               type="button"
+              aria-disabled={locked || undefined}
               onClick={() => onNavigate(item.path)}
               style={{
                 display: "flex",
@@ -54,21 +62,22 @@ export default function SidebarCollapsedIconNav({
                 color: active
                   ? "var(--fn-sidebar-item-active-text)"
                   : "var(--fn-text-tertiary)",
-                cursor: "pointer",
+                cursor: locked ? "not-allowed" : "pointer",
+                opacity: locked ? 0.45 : 1,
                 transition: "all var(--fn-transition-fast)",
                 marginBottom: 2,
                 position: "relative",
               }}
               onMouseEnter={(e) => {
                 prefetchRoute(item.path);
-                if (!active) {
+                if (!active && !locked) {
                   e.currentTarget.style.background =
                     "var(--fn-sidebar-item-hover)";
                   e.currentTarget.style.color = "var(--fn-text-primary)";
                 }
               }}
               onMouseLeave={(e) => {
-                if (!active) {
+                if (!active && !locked) {
                   e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--fn-text-tertiary)";
                 }

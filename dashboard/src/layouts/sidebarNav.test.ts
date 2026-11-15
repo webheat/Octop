@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   SIDEBAR_GROUPED_NAV_KEYS,
   SIDEBAR_NAV_KEYS,
+  TEMP_HIDDEN_NAV_KEYS,
   buildNavSections,
+  hideTempNavItems,
   isGroupedNavKey,
 } from "./sidebarNav";
 import type { OctopUser } from "../api/modules/auth";
@@ -57,5 +59,20 @@ describe("sidebarNav", () => {
       "control",
       "admin",
     ]);
+  });
+
+  it("temporarily hides the settings entries without changing the catalog", () => {
+    const sections = hideTempNavItems(
+      buildNavSections(adminUser, { mobileEnabled: true }),
+    );
+    const keys = sections.flatMap((section) =>
+      section.items.map((item) => item.key),
+    );
+    for (const key of TEMP_HIDDEN_NAV_KEYS) {
+      expect(keys).not.toContain(key);
+    }
+    expect(sections.some((section) => section.id === "settings")).toBe(false);
+    expect(keys).toContain("chat");
+    expect(keys).toContain("product-library");
   });
 });

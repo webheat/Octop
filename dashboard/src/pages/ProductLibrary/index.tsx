@@ -9,6 +9,7 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from "antd";
@@ -16,10 +17,12 @@ import {
   Archive,
   Download,
   FilePlus2,
+  FileVideo,
   Package,
   Plus,
   Sparkles,
   Upload as UploadIcon,
+  Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -35,6 +38,8 @@ import { useDesktopVideoJobs } from "../../context/DesktopVideoJobsContext";
 import PageShell from "../../layouts/PageShell";
 import { message } from "../../utils/antdMessage";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useDesktopMinimalMode } from "../../hooks/useDesktopMinimalMode";
+import { isPaidTierUser } from "../../utils/permissions";
 
 const blank: Omit<Product, "id"> = {
   name: "",
@@ -47,7 +52,19 @@ const blank: Omit<Product, "id"> = {
 
 function classifyUsage(file: File): ProductAsset["usage"] {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "mp4", "webm", "mov", "m4v"].includes(extension)
+  return [
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "avif",
+    "mp4",
+    "webm",
+    "mov",
+    "m4v",
+  ].includes(extension)
     ? "scene"
     : "reference";
 }
@@ -64,6 +81,10 @@ export default function ProductLibraryPage() {
   const currentUser = useCurrentUser();
   const ownerId = currentUser?.id;
   const { bridgeAvailable: isDesktop } = useDesktopVideoJobs();
+  // The customer-facing shell hides the navigation rail, so the video tooling
+  // needs an entry point here; in the full dashboard the sidebar covers it.
+  const desktopMinimal = useDesktopMinimalMode();
+  const analysisUnlocked = isPaidTierUser(currentUser);
   const [products, setProducts] = useState<Product[]>([]);
   const [projects, setProjects] = useState<ProductProject[]>([]);
   const [active, setActive] = useState<Product | null>(null);
@@ -106,7 +127,11 @@ export default function ProductLibraryPage() {
   const [projectBusy, setProjectBusy] = useState(false);
   const [preparingId, setPreparingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
+    null,
+  );
+  const [describeBusy, setDescribeBusy] = useState<string | null>(null);
+  const [describeBatchBusy, setDescribeBatchBusy] = useState(false);
 
   const selectProduct = (product: Product | null) => {
     if (activeProductId.current !== product?.id) {
@@ -143,12 +168,18 @@ export default function ProductLibraryPage() {
       if (version === reloadVersion.current) throw error;
       return;
     }
-    if (version !== reloadVersion.current || requestedOwner !== currentOwnerId.current) return;
+    if (
+      version !== reloadVersion.current ||
+      requestedOwner !== currentOwnerId.current
+    )
+      return;
     setProducts(p.items);
     setProjects(pr.items);
     setLoadFailed(false);
     if (activeProductId.current) {
-      selectProduct(p.items.find((x) => x.id === activeProductId.current) ?? null);
+      selectProduct(
+        p.items.find((x) => x.id === activeProductId.current) ?? null,
+      );
     }
   };
   useEffect(() => {
@@ -175,12 +206,21 @@ export default function ProductLibraryPage() {
   }, [ownerId]);
   useEffect(() => {
     const version = ownerVersion.current;
-    void reload().catch(() => { if (version === ownerVersion.current) { setLoadFailed(true); message.error(t("productLibrary.failed")); } });
+    void reload().catch(() => {
+      if (version === ownerVersion.current) {
+        setLoadFailed(true);
+        message.error(t("productLibrary.failed"));
+      }
+    });
     void request<OctopAgent[]>("/agents?scope=all")
-      .then((rows) =>
-        version === ownerVersion.current && setAgents(rows.filter((a) => a.is_owner && a.state === "running")),
+      .then(
+        (rows) =>
+          version === ownerVersion.current &&
+          setAgents(rows.filter((a) => a.is_owner && a.state === "running")),
       )
-      .catch(() => { if (version === ownerVersion.current) setAgents([]); });
+      .catch(() => {
+        if (version === ownerVersion.current) setAgents([]);
+      });
   }, [ownerId, loadRetry]);
   useEffect(() => {
     setAssets([]);
@@ -197,7 +237,14 @@ export default function ProductLibraryPage() {
         if (current) {
           setAssetLoadFailed(false);
           setAssets(r.items);
-          setSelectedAssets(r.items.filter((a) => a.active && a.usage === "scene" && isVideoMedia(a.media_type)).map((a) => a.id));
+          setSelectedAssets(
+            r.items
+              .filter(
+                (a) =>
+                  a.active && a.usage === "scene" && isVideoMedia(a.media_type),
+              )
+              .map((a) => a.id),
+          );
         }
       })
       .catch(() => {
@@ -234,9 +281,12 @@ export default function ProductLibraryPage() {
             ? !a.media_type.startsWith("image/") &&
               !a.media_type.startsWith("video/")
             : a.media_type.startsWith(`${assetKind}/`));
+        const query = assetSearch.toLowerCase();
         return (
           typeMatches &&
-          a.filename.toLowerCase().includes(assetSearch.toLowerCase())
+          (a.filename.toLowerCase().includes(query) ||
+            (a.ai_description ?? "").toLowerCase().includes(query) ||
+            (a.ai_tags ?? []).some((tag) => tag.toLowerCase().includes(query)))
         );
       }),
     [assets, assetKind, assetSearch],
@@ -284,7 +334,10 @@ export default function ProductLibraryPage() {
       };
       let savedProduct: Product | undefined;
       if (editing && active)
-        savedProduct = await productLibraryApi.updateProduct(active.id, payload);
+        savedProduct = await productLibraryApi.updateProduct(
+          active.id,
+          payload,
+        );
       else savedProduct = await productLibraryApi.createProduct(payload);
       if (version !== ownerVersion.current) return;
       setBusy(false);
@@ -293,7 +346,8 @@ export default function ProductLibraryPage() {
       if (version !== ownerVersion.current) return;
       message.success(t("productLibrary.saved"));
     } catch {
-      if (version === ownerVersion.current) message.error(t("productLibrary.failed"));
+      if (version === ownerVersion.current)
+        message.error(t("productLibrary.failed"));
     } finally {
       if (version === ownerVersion.current) setSaving(false);
     }
@@ -308,43 +362,172 @@ export default function ProductLibraryPage() {
     const uploadedIds: string[] = [];
     const batch = [...files];
     const priorIds = new Set(assets.map((asset) => asset.id));
-    setUploadProgress(t("productLibrary.uploadProgress", { done: 0, total: batch.length }));
+    setUploadProgress(
+      t("productLibrary.uploadProgress", { done: 0, total: batch.length }),
+    );
     try {
-    for (const [index, file] of batch.entries()) {
-      if (activeProductId.current !== productId || productSelectionVersion.current !== selectionVersion) break;
-      setUploadProgress(t("productLibrary.uploadProgress", { done: index, total: batch.length }));
-      try {
-        const inferredUsage = usage === "auto" ? classifyUsage(file) : usage;
-        const result = await productLibraryApi.upload(productId, [file], inferredUsage);
-        if (activeProductId.current !== productId || productSelectionVersion.current !== selectionVersion || ownerVersion.current !== accountVersion) break;
-        uploadedIds.push(...result.items.filter((asset) => !priorIds.has(asset.id) && asset.active && asset.usage === "scene" && isVideoMedia(asset.media_type)).map((asset) => asset.id));
-        succeeded += 1;
-        setFiles((current) => current.filter((item) => item !== file));
-      } catch {
-        // Keep failed entries in the queue for an explicit retry.
-      }
-    }
-    if (activeProductId.current === productId && productSelectionVersion.current === selectionVersion && ownerVersion.current === accountVersion) {
-      try {
-        const r = await productLibraryApi.assets(productId);
-        if (activeProductId.current === productId && productSelectionVersion.current === selectionVersion && ownerVersion.current === accountVersion) {
-          setAssets(r.items);
-          const validIds = new Set(r.items.filter((asset) => asset.active && asset.usage === "scene" && isVideoMedia(asset.media_type)).map((asset) => asset.id));
-          setSelectedAssets((current) => [...new Set([...current.filter((id) => validIds.has(id)), ...uploadedIds.filter((id) => validIds.has(id))])]);
+      for (const [index, file] of batch.entries()) {
+        if (
+          activeProductId.current !== productId ||
+          productSelectionVersion.current !== selectionVersion
+        )
+          break;
+        setUploadProgress(
+          t("productLibrary.uploadProgress", {
+            done: index,
+            total: batch.length,
+          }),
+        );
+        try {
+          const inferredUsage = usage === "auto" ? classifyUsage(file) : usage;
+          const result = await productLibraryApi.upload(
+            productId,
+            [file],
+            inferredUsage,
+          );
+          if (
+            activeProductId.current !== productId ||
+            productSelectionVersion.current !== selectionVersion ||
+            ownerVersion.current !== accountVersion
+          )
+            break;
+          uploadedIds.push(
+            ...result.items
+              .filter(
+                (asset) =>
+                  !priorIds.has(asset.id) &&
+                  asset.active &&
+                  asset.usage === "scene" &&
+                  isVideoMedia(asset.media_type),
+              )
+              .map((asset) => asset.id),
+          );
+          succeeded += 1;
+          setFiles((current) => current.filter((item) => item !== file));
+        } catch {
+          // Keep failed entries in the queue for an explicit retry.
         }
-      } catch {
-        if (ownerVersion.current === accountVersion && productSelectionVersion.current === selectionVersion) message.error(t("productLibrary.failed"));
       }
-    }
-    if (ownerVersion.current === accountVersion && activeProductId.current === productId && productSelectionVersion.current === selectionVersion) {
-      if (succeeded) message.success(t("productLibrary.uploadedCount", { count: succeeded }));
-      if (batch.length > succeeded) message.error(t("productLibrary.uploadFailedCount", { count: batch.length - succeeded }));
-    }
+      if (
+        activeProductId.current === productId &&
+        productSelectionVersion.current === selectionVersion &&
+        ownerVersion.current === accountVersion
+      ) {
+        try {
+          const r = await productLibraryApi.assets(productId);
+          if (
+            activeProductId.current === productId &&
+            productSelectionVersion.current === selectionVersion &&
+            ownerVersion.current === accountVersion
+          ) {
+            setAssets(r.items);
+            const validIds = new Set(
+              r.items
+                .filter(
+                  (asset) =>
+                    asset.active &&
+                    asset.usage === "scene" &&
+                    isVideoMedia(asset.media_type),
+                )
+                .map((asset) => asset.id),
+            );
+            setSelectedAssets((current) => [
+              ...new Set([
+                ...current.filter((id) => validIds.has(id)),
+                ...uploadedIds.filter((id) => validIds.has(id)),
+              ]),
+            ]);
+          }
+        } catch {
+          if (
+            ownerVersion.current === accountVersion &&
+            productSelectionVersion.current === selectionVersion
+          )
+            message.error(t("productLibrary.failed"));
+        }
+      }
+      if (
+        ownerVersion.current === accountVersion &&
+        activeProductId.current === productId &&
+        productSelectionVersion.current === selectionVersion
+      ) {
+        if (succeeded)
+          message.success(
+            t("productLibrary.uploadedCount", { count: succeeded }),
+          );
+        if (batch.length > succeeded)
+          message.error(
+            t("productLibrary.uploadFailedCount", {
+              count: batch.length - succeeded,
+            }),
+          );
+      }
     } finally {
-      if (ownerVersion.current === accountVersion && productSelectionVersion.current === selectionVersion) {
+      if (
+        ownerVersion.current === accountVersion &&
+        productSelectionVersion.current === selectionVersion
+      ) {
         setUploadBusy(false);
         setUploadProgress("");
       }
+    }
+  };
+  const describeOne = async (a: ProductAsset) => {
+    const accountVersion = ownerVersion.current;
+    const selectionVersion = productSelectionVersion.current;
+    setDescribeBusy(a.id);
+    try {
+      const updated = await productLibraryApi.describeAsset(a.id);
+      if (
+        accountVersion !== ownerVersion.current ||
+        selectionVersion !== productSelectionVersion.current
+      )
+        return;
+      setAssets((all) =>
+        all.map((x) => (x.id === a.id ? { ...x, ...updated } : x)),
+      );
+      if (updated.ai_status === "failed")
+        message.error(
+          updated.ai_error || t("productLibrary.aiDescriptionFailed"),
+        );
+    } catch {
+      if (accountVersion === ownerVersion.current)
+        message.error(t("productLibrary.failed"));
+    } finally {
+      if (accountVersion === ownerVersion.current) setDescribeBusy(null);
+    }
+  };
+  const describeBatch = async () => {
+    if (!active) return;
+    const accountVersion = ownerVersion.current;
+    const selectionVersion = productSelectionVersion.current;
+    setDescribeBatchBusy(true);
+    try {
+      const result = await productLibraryApi.describeMissing(active.id);
+      if (
+        accountVersion !== ownerVersion.current ||
+        selectionVersion !== productSelectionVersion.current
+      )
+        return;
+      if (result.items.length) {
+        const byId = new Map(result.items.map((item) => [item.id, item]));
+        setAssets((all) => all.map((x) => byId.get(x.id) ?? x));
+      }
+      if (result.total === 0)
+        message.info(t("productLibrary.aiDescriptionEmpty"));
+      else if (result.failed)
+        message.warning(
+          t("productLibrary.aiDescriptionPartial", { failed: result.failed }),
+        );
+      else
+        message.success(
+          t("productLibrary.aiDescriptionDone", { count: result.succeeded }),
+        );
+    } catch {
+      if (accountVersion === ownerVersion.current)
+        message.error(t("productLibrary.failed"));
+    } finally {
+      if (accountVersion === ownerVersion.current) setDescribeBatchBusy(false);
     }
   };
   const createProject = async () => {
@@ -358,14 +541,26 @@ export default function ProductLibraryPage() {
         name: projectName,
         asset_ids: selectedAssets,
       });
-      if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+      if (
+        accountVersion !== ownerVersion.current ||
+        selectionVersion !== productSelectionVersion.current
+      )
+        return;
       setProjects((current) => [p, ...current]);
       setProjectName("");
       message.success(t("productLibrary.snapshotCreated"));
     } catch {
-      if (accountVersion === ownerVersion.current && selectionVersion === productSelectionVersion.current) message.error(t("productLibrary.failed"));
+      if (
+        accountVersion === ownerVersion.current &&
+        selectionVersion === productSelectionVersion.current
+      )
+        message.error(t("productLibrary.failed"));
     } finally {
-      if (accountVersion === ownerVersion.current && selectionVersion === productSelectionVersion.current) setProjectBusy(false);
+      if (
+        accountVersion === ownerVersion.current &&
+        selectionVersion === productSelectionVersion.current
+      )
+        setProjectBusy(false);
     }
   };
   const prepare = async (project: ProductProject) => {
@@ -386,7 +581,9 @@ export default function ProductLibraryPage() {
     setDeletingProjectId(project.id);
     try {
       await productLibraryApi.deleteProject(project.id);
-      setProjects((current) => current.filter((item) => item.id !== project.id));
+      setProjects((current) =>
+        current.filter((item) => item.id !== project.id),
+      );
       message.success(t("productLibrary.projectDeleted"));
     } catch {
       message.error(t("productLibrary.projectDeleteFailed"));
@@ -413,28 +610,42 @@ export default function ProductLibraryPage() {
       setDownloadingId(null);
     }
   };
-  const previewAsset = useCallback(async (asset: ProductAsset) => {
-    if (previewUrls.current[asset.id] || previewRequested.current.has(asset.id)) return;
-    const productId = active?.id;
-    const contextVersion = previewContextVersion.current;
-    const requestedOwner = ownerId;
-    previewRequested.current.add(asset.id);
-    setPreviewBusy(asset.id);
-    try {
-      const blob = await productLibraryApi.downloadAsset(asset.id);
-      const url = URL.createObjectURL(blob);
-      if (previewContextVersion.current !== contextVersion || previewProductId.current !== productId || activeProductId.current !== productId || currentOwnerId.current !== requestedOwner) {
-        URL.revokeObjectURL(url);
+  const previewAsset = useCallback(
+    async (asset: ProductAsset) => {
+      if (
+        previewUrls.current[asset.id] ||
+        previewRequested.current.has(asset.id)
+      )
         return;
+      const productId = active?.id;
+      const contextVersion = previewContextVersion.current;
+      const requestedOwner = ownerId;
+      previewRequested.current.add(asset.id);
+      setPreviewBusy(asset.id);
+      try {
+        const blob = await productLibraryApi.downloadAsset(asset.id);
+        const url = URL.createObjectURL(blob);
+        if (
+          previewContextVersion.current !== contextVersion ||
+          previewProductId.current !== productId ||
+          activeProductId.current !== productId ||
+          currentOwnerId.current !== requestedOwner
+        ) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        previewUrls.current[asset.id] = url;
+        setPreviews((all) => ({ ...all, [asset.id]: url }));
+      } catch {
+        if (previewContextVersion.current === contextVersion)
+          message.error(tRef.current("productLibrary.failed"));
+      } finally {
+        if (previewContextVersion.current === contextVersion)
+          setPreviewBusy(null);
       }
-      previewUrls.current[asset.id] = url;
-      setPreviews((all) => ({ ...all, [asset.id]: url }));
-    } catch {
-      if (previewContextVersion.current === contextVersion) message.error(tRef.current("productLibrary.failed"));
-    } finally {
-      if (previewContextVersion.current === contextVersion) setPreviewBusy(null);
-    }
-  }, [active?.id, ownerId]);
+    },
+    [active?.id, ownerId],
+  );
   const retryPreview = (asset: ProductAsset) => {
     previewRequested.current.delete(asset.id);
     void previewAsset(asset);
@@ -454,23 +665,46 @@ export default function ProductLibraryPage() {
   }, [active?.id, ownerId]);
   useEffect(() => {
     let cancelled = false;
-    const images = visibleAssets.filter((asset) => asset.media_type.startsWith("image/"));
+    const images = visibleAssets.filter((asset) =>
+      asset.media_type.startsWith("image/"),
+    );
     void (async () => {
       for (let i = 0; i < images.length; i += 2) {
         if (cancelled) return;
-        await Promise.all(images.slice(i, i + 2).map((asset) => previewAsset(asset)));
+        await Promise.all(
+          images.slice(i, i + 2).map((asset) => previewAsset(asset)),
+        );
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [visibleAssets, previewAsset]);
-  const availableSelected = assets.filter((a) => selectedAssets.includes(a.id) && a.active && a.usage === "scene" && isVideoMedia(a.media_type)).length;
+  const availableSelected = assets.filter(
+    (a) =>
+      selectedAssets.includes(a.id) &&
+      a.active &&
+      a.usage === "scene" &&
+      isVideoMedia(a.media_type),
+  ).length;
   const openWizard = () => {
     if (!active) {
       navigate("/product-library/video-wizard");
       return;
     }
-    const assetIds = selectedAssets.filter((id) => assets.some((a) => a.id === id && a.active && a.usage === "scene" && isVideoMedia(a.media_type)));
-    navigate(`/product-library/video-wizard?product=${encodeURIComponent(active.id)}`, { state: { productId: active.id, assetIds, ownerId } });
+    const assetIds = selectedAssets.filter((id) =>
+      assets.some(
+        (a) =>
+          a.id === id &&
+          a.active &&
+          a.usage === "scene" &&
+          isVideoMedia(a.media_type),
+      ),
+    );
+    navigate(
+      `/product-library/video-wizard?product=${encodeURIComponent(active.id)}`,
+      { state: { productId: active.id, assetIds, ownerId } },
+    );
   };
 
   return (
@@ -478,14 +712,43 @@ export default function ProductLibraryPage() {
       title={t("productLibrary.title")}
       subtitle={t("productLibrary.subtitle")}
       actions={
-        <Button
-          type="primary"
-          icon={<Sparkles size={16} />}
-          disabled={uploadBusy || Boolean(active && !availableSelected)}
-          onClick={openWizard}
-        >
-          {t("productLibrary.makeVideo")}
-        </Button>
+        <Space size={8} wrap>
+          {desktopMinimal && (
+            <Button
+              icon={<Wrench size={16} />}
+              onClick={() => navigate("/video-environment")}
+            >
+              {t("nav.videoEnvironment")}
+            </Button>
+          )}
+          {desktopMinimal && (
+            <Tooltip
+              title={analysisUnlocked ? "" : t("nav.videoAnalysisLockedHint")}
+            >
+              <Button
+                icon={<FileVideo size={16} />}
+                onClick={() => navigate("/video-analysis")}
+                style={analysisUnlocked ? undefined : { opacity: 0.6 }}
+              >
+                {t("nav.videoAnalysis")}
+                <Tag
+                  color="gold"
+                  style={{ marginInlineStart: 6, marginInlineEnd: 0 }}
+                >
+                  PRO
+                </Tag>
+              </Button>
+            </Tooltip>
+          )}
+          <Button
+            type="primary"
+            icon={<Sparkles size={16} />}
+            disabled={uploadBusy || Boolean(active && !availableSelected)}
+            onClick={openWizard}
+          >
+            {t("productLibrary.makeVideo")}
+          </Button>
+        </Space>
       }
     >
       <div
@@ -545,7 +808,9 @@ export default function ProductLibraryPage() {
                 ))
             ) : loadFailed ? (
               <Empty description={t("productLibrary.loadFailed")}>
-                <Button onClick={() => setLoadRetry((value) => value + 1)}>{t("productLibrary.retry")}</Button>
+                <Button onClick={() => setLoadRetry((value) => value + 1)}>
+                  {t("productLibrary.retry")}
+                </Button>
               </Empty>
             ) : (
               <Empty
@@ -579,10 +844,16 @@ export default function ProductLibraryPage() {
                         Modal.confirm({
                           title: t("productLibrary.deleteConfirm"),
                           onOk: async () => {
-                                const accountVersion = ownerVersion.current;
-                                const selectionVersion = productSelectionVersion.current;
+                            const accountVersion = ownerVersion.current;
+                            const selectionVersion =
+                              productSelectionVersion.current;
                             await productLibraryApi.deleteProduct(active.id);
-                                if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+                            if (
+                              accountVersion !== ownerVersion.current ||
+                              selectionVersion !==
+                                productSelectionVersion.current
+                            )
+                              return;
                             selectProduct(null);
                             await reload();
                           },
@@ -621,7 +892,16 @@ export default function ProductLibraryPage() {
               </Card>
               <Card
                 title={t("productLibrary.assets")}
-                extra={<Space><Tag color="magenta">{activeCount}</Tag><Tag>{t("productLibrary.selectedCount", { count: availableSelected })}</Tag></Space>}
+                extra={
+                  <Space>
+                    <Tag color="magenta">{activeCount}</Tag>
+                    <Tag>
+                      {t("productLibrary.selectedCount", {
+                        count: availableSelected,
+                      })}
+                    </Tag>
+                  </Space>
+                }
               >
                 <Space wrap style={{ marginBottom: 12 }}>
                   <Upload
@@ -644,7 +924,10 @@ export default function ProductLibraryPage() {
                     }}
                     disabled={uploadBusy}
                   >
-                    <Button icon={<FilePlus2 size={16} />} disabled={uploadBusy}>
+                    <Button
+                      icon={<FilePlus2 size={16} />}
+                      disabled={uploadBusy}
+                    >
                       {t("productLibrary.chooseFiles")}
                     </Button>
                   </Upload>
@@ -653,7 +936,10 @@ export default function ProductLibraryPage() {
                     onChange={setUsage}
                     disabled={uploadBusy}
                     options={[
-                      { value: "auto", label: t("productLibrary.autoClassify") },
+                      {
+                        value: "auto",
+                        label: t("productLibrary.autoClassify"),
+                      },
                       { value: "scene", label: t("productLibrary.scene") },
                       {
                         value: "reference",
@@ -671,16 +957,71 @@ export default function ProductLibraryPage() {
                   >
                     {t("productLibrary.upload")}
                   </Button>
-                  {uploadProgress && <Typography.Text>{uploadProgress}</Typography.Text>}
+                  {uploadProgress && (
+                    <Typography.Text>{uploadProgress}</Typography.Text>
+                  )}
                 </Space>
                 <Space wrap style={{ marginBottom: 12 }}>
-                  <Button disabled={uploadBusy || !assets.some((a) => a.active && a.usage === "scene" && isVideoMedia(a.media_type))} onClick={() => setSelectedAssets((all) => [...new Set([...all, ...assets.filter((a) => a.active && a.usage === "scene" && isVideoMedia(a.media_type)).map((a) => a.id)])])}>{t("productLibrary.selectAvailable")}</Button>
-                  <Button disabled={uploadBusy} onClick={() => setSelectedAssets([])}>{t("productLibrary.clearSelection")}</Button>
-                  <Button type="primary" disabled={uploadBusy || !availableSelected} onClick={openWizard}>{t("productLibrary.makeVideoSelected", { count: availableSelected })}</Button>
-                  {uploadBusy && <Typography.Text type="secondary">{t("productLibrary.waitForUpload")}</Typography.Text>}
-                  {!uploadBusy && !availableSelected && <Typography.Text type="secondary">{t("productLibrary.noSelectedMedia")}</Typography.Text>}
+                  <Button
+                    disabled={
+                      uploadBusy ||
+                      !assets.some(
+                        (a) =>
+                          a.active &&
+                          a.usage === "scene" &&
+                          isVideoMedia(a.media_type),
+                      )
+                    }
+                    onClick={() =>
+                      setSelectedAssets((all) => [
+                        ...new Set([
+                          ...all,
+                          ...assets
+                            .filter(
+                              (a) =>
+                                a.active &&
+                                a.usage === "scene" &&
+                                isVideoMedia(a.media_type),
+                            )
+                            .map((a) => a.id),
+                        ]),
+                      ])
+                    }
+                  >
+                    {t("productLibrary.selectAvailable")}
+                  </Button>
+                  <Button
+                    disabled={uploadBusy}
+                    onClick={() => setSelectedAssets([])}
+                  >
+                    {t("productLibrary.clearSelection")}
+                  </Button>
+                  <Button
+                    type="primary"
+                    disabled={uploadBusy || !availableSelected}
+                    onClick={openWizard}
+                  >
+                    {t("productLibrary.makeVideoSelected", {
+                      count: availableSelected,
+                    })}
+                  </Button>
+                  {uploadBusy && (
+                    <Typography.Text type="secondary">
+                      {t("productLibrary.waitForUpload")}
+                    </Typography.Text>
+                  )}
+                  {!uploadBusy && !availableSelected && (
+                    <Typography.Text type="secondary">
+                      {t("productLibrary.noSelectedMedia")}
+                    </Typography.Text>
+                  )}
                 </Space>
-                <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>{t("productLibrary.supportedFormats")}</Typography.Text>
+                <Typography.Text
+                  type="secondary"
+                  style={{ display: "block", marginBottom: 12 }}
+                >
+                  {t("productLibrary.supportedFormats")}
+                </Typography.Text>
                 <Space wrap style={{ display: "flex", marginBottom: 12 }}>
                   <Input.Search
                     placeholder={t("productLibrary.searchAssets")}
@@ -701,33 +1042,74 @@ export default function ProductLibraryPage() {
                       },
                     ]}
                   />
+                  <Button
+                    loading={describeBatchBusy}
+                    disabled={!active}
+                    onClick={() => void describeBatch()}
+                  >
+                    {t("productLibrary.aiDescriptionBatch")}
+                  </Button>
                 </Space>
                 {assetLoadFailed ? (
                   <Empty description={t("productLibrary.assetsFailed")}>
-                    <Button onClick={() => setAssetRetry((value) => value + 1)}>{t("productLibrary.retry")}</Button>
+                    <Button onClick={() => setAssetRetry((value) => value + 1)}>
+                      {t("productLibrary.retry")}
+                    </Button>
                   </Empty>
                 ) : visibleAssets.length ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 260px), 1fr))", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fill, minmax(min(100%, 260px), 1fr))",
+                      gap: 12,
+                    }}
+                  >
                     {visibleAssets.map((a) => (
-                      <Card
-                        size="small"
-                        key={a.id}
-                        style={{ marginBottom: 8 }}
-                      >
-                        {a.media_type.startsWith("image/") && previews[a.id] && <img src={previews[a.id]} alt={a.filename} style={{ width: "100%", height: 150, objectFit: "contain" }} />}
-                        {a.media_type.startsWith("image/") && !previews[a.id] && <Button size="small" loading={previewBusy === a.id} onClick={() => retryPreview(a)}>{t("productLibrary.previewRetry")}</Button>}
-                        {previews[a.id] && a.media_type.startsWith("video/") && (
+                      <Card size="small" key={a.id} style={{ marginBottom: 8 }}>
+                        {a.media_type.startsWith("image/") &&
+                          previews[a.id] && (
+                            <img
+                              src={previews[a.id]}
+                              alt={a.filename}
+                              style={{
+                                width: "100%",
+                                height: 150,
+                                objectFit: "contain",
+                              }}
+                            />
+                          )}
+                        {a.media_type.startsWith("image/") &&
+                          !previews[a.id] && (
+                            <Button
+                              size="small"
+                              loading={previewBusy === a.id}
+                              onClick={() => retryPreview(a)}
+                            >
+                              {t("productLibrary.previewRetry")}
+                            </Button>
+                          )}
+                        {previews[a.id] &&
+                          a.media_type.startsWith("video/") && (
                             <video
                               src={previews[a.id]}
                               controls
-                              style={{ width: "100%", maxWidth: 260, maxHeight: 170 }}
+                              style={{
+                                width: "100%",
+                                maxWidth: 260,
+                                maxHeight: 170,
+                              }}
                             />
                           )}
                         <input
                           aria-label={a.filename}
                           type="checkbox"
                           checked={selectedAssets.includes(a.id)}
-                          disabled={!a.active || a.usage !== "scene" || !isVideoMedia(a.media_type)}
+                          disabled={
+                            !a.active ||
+                            a.usage !== "scene" ||
+                            !isVideoMedia(a.media_type)
+                          }
                           onChange={(e) =>
                             setSelectedAssets((all) =>
                               e.target.checked
@@ -742,6 +1124,63 @@ export default function ProductLibraryPage() {
                             ({Math.ceil(a.byte_size / 1024)} KB)
                           </Typography.Text>
                         </span>
+                        {a.media_type.startsWith("image/") && (
+                          <div style={{ marginTop: 8 }}>
+                            {a.ai_status === "ready" ? (
+                              <>
+                                <Typography.Paragraph
+                                  style={{
+                                    marginBottom: 6,
+                                    whiteSpace: "pre-wrap",
+                                  }}
+                                >
+                                  {a.ai_description}
+                                </Typography.Paragraph>
+                                <Space
+                                  wrap
+                                  size={[4, 4]}
+                                  style={{ marginBottom: 6 }}
+                                >
+                                  {(a.ai_tags ?? []).map((tag) => (
+                                    <Tag key={tag}>{tag}</Tag>
+                                  ))}
+                                </Space>
+                                <Typography.Text
+                                  type="secondary"
+                                  style={{ display: "block" }}
+                                >
+                                  {t("productLibrary.aiDescriptionModel")}:{" "}
+                                  {a.ai_model}
+                                </Typography.Text>
+                              </>
+                            ) : a.ai_status === "failed" ? (
+                              <Typography.Text
+                                type="danger"
+                                style={{ display: "block" }}
+                              >
+                                {t("productLibrary.aiDescriptionFailed")}:{" "}
+                                {a.ai_error}
+                              </Typography.Text>
+                            ) : (
+                              <Typography.Text
+                                type="secondary"
+                                style={{ display: "block" }}
+                              >
+                                {t("productLibrary.aiDescriptionEmpty")}
+                              </Typography.Text>
+                            )}
+                            <Button
+                              size="small"
+                              style={{ marginTop: 6 }}
+                              loading={describeBusy === a.id}
+                              onClick={() => void describeOne(a)}
+                            >
+                              {a.ai_status === "ready"
+                                ? t("productLibrary.aiDescriptionRegenerate")
+                                : t("productLibrary.aiDescriptionGenerate")}
+                            </Button>
+                          </div>
+                        )}
                         {a.media_type.startsWith("video/") && (
                           <Button
                             size="small"
@@ -759,18 +1198,26 @@ export default function ProductLibraryPage() {
                           style={{ width: 130 }}
                           onChange={async (v) => {
                             const accountVersion = ownerVersion.current;
-                            const selectionVersion = productSelectionVersion.current;
+                            const selectionVersion =
+                              productSelectionVersion.current;
                             await productLibraryApi.updateAsset(a.id, {
                               usage: v,
                             });
-                            if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+                            if (
+                              accountVersion !== ownerVersion.current ||
+                              selectionVersion !==
+                                productSelectionVersion.current
+                            )
+                              return;
                             setAssets((all) =>
                               all.map((x) =>
                                 x.id === a.id ? { ...x, usage: v } : x,
                               ),
                             );
                             if (v !== "scene")
-                              setSelectedAssets((all) => all.filter((id) => id !== a.id));
+                              setSelectedAssets((all) =>
+                                all.filter((id) => id !== a.id),
+                              );
                           }}
                           options={[
                             {
@@ -791,11 +1238,17 @@ export default function ProductLibraryPage() {
                           size="small"
                           onClick={async () => {
                             const accountVersion = ownerVersion.current;
-                            const selectionVersion = productSelectionVersion.current;
+                            const selectionVersion =
+                              productSelectionVersion.current;
                             const blob = await productLibraryApi.downloadAsset(
                               a.id,
                             );
-                            if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+                            if (
+                              accountVersion !== ownerVersion.current ||
+                              selectionVersion !==
+                                productSelectionVersion.current
+                            )
+                              return;
                             const url = URL.createObjectURL(blob);
                             const link = document.createElement("a");
                             link.href = url;
@@ -814,12 +1267,18 @@ export default function ProductLibraryPage() {
                           type={a.priority ? "primary" : "default"}
                           onClick={async () => {
                             const accountVersion = ownerVersion.current;
-                            const selectionVersion = productSelectionVersion.current;
+                            const selectionVersion =
+                              productSelectionVersion.current;
                             const priority = !a.priority;
                             await productLibraryApi.updateAsset(a.id, {
                               priority,
                             });
-                            if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+                            if (
+                              accountVersion !== ownerVersion.current ||
+                              selectionVersion !==
+                                productSelectionVersion.current
+                            )
+                              return;
                             setAssets((all) =>
                               all.map((x) =>
                                 x.id === a.id
@@ -837,12 +1296,18 @@ export default function ProductLibraryPage() {
                           size="small"
                           onClick={async () => {
                             const accountVersion = ownerVersion.current;
-                            const selectionVersion = productSelectionVersion.current;
+                            const selectionVersion =
+                              productSelectionVersion.current;
                             const activeFlag = !a.active;
                             await productLibraryApi.updateAsset(a.id, {
                               active: activeFlag,
                             });
-                            if (accountVersion !== ownerVersion.current || selectionVersion !== productSelectionVersion.current) return;
+                            if (
+                              accountVersion !== ownerVersion.current ||
+                              selectionVersion !==
+                                productSelectionVersion.current
+                            )
+                              return;
                             setAssets((all) =>
                               all.map((x) =>
                                 x.id === a.id

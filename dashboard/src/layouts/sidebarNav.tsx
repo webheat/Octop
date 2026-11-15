@@ -19,9 +19,11 @@ import {
   GraduationCap,
   Shield,
   PanelsTopLeft,
+  Wrench,
+  FileVideo,
 } from "lucide-react";
 import type { OctopUser } from "../api/modules/auth";
-import { navAllowed, userCan } from "../utils/permissions";
+import { isPaidTierUser, navAllowed, userCan } from "../utils/permissions";
 
 export const EXPANDED_WIDTH = 220;
 export const COLLAPSED_WIDTH = 56;
@@ -51,6 +53,9 @@ export interface NavItem {
   icon: ReactNode;
   labelKey: string;
   badge?: string;
+  /** Paid/unavailable entry: dimmed, with a tooltip explaining why. */
+  disabled?: boolean;
+  disabledReasonKey?: string;
 }
 
 export interface NavSection {
@@ -79,6 +84,8 @@ export const SIDEBAR_NAV_KEYS = [
   "workbench",
   "remote-desktop",
   "acp",
+  "video-environment",
+  "video-analysis",
   "admin-users",
   "models",
   "admin-storage",
@@ -133,6 +140,8 @@ export const SIDEBAR_GROUPED_NAV_KEYS = [
   "workbench",
   "remote-desktop",
   "acp",
+  "video-environment",
+  "video-analysis",
   "admin-users",
   "models",
   "admin-storage",
@@ -146,6 +155,31 @@ const GROUPED_NAV_KEY_SET = new Set<string>(SIDEBAR_GROUPED_NAV_KEYS);
 
 export function isGroupedNavKey(key: string): boolean {
   return GROUPED_NAV_KEY_SET.has(key);
+}
+
+/**
+ * Settings entries temporarily hidden from the sidebar (customer-facing build).
+ * The catalog, permissions, routes and saved sidebar layouts stay untouched;
+ * clear this list to bring the entries back.
+ */
+export const TEMP_HIDDEN_NAV_KEYS: readonly string[] = [
+  "personalization",
+  "channels",
+  "connectors",
+  "skill-packages",
+  "knowledge-bases",
+  "bridge",
+];
+
+/** Drop temporarily hidden items and omit groups that become empty. */
+export function hideTempNavItems(sections: NavSection[]): NavSection[] {
+  const hidden = new Set<string>(TEMP_HIDDEN_NAV_KEYS);
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !hidden.has(item.key)),
+    }))
+    .filter((section) => section.items.length > 0);
 }
 
 export function buildNavSections(
@@ -250,6 +284,23 @@ export function buildNavSections(
   }
 
   const controlItems: NavItem[] = [];
+  // Video tooling is visible to everyone; the paid analysis entry is dimmed
+  // for account types without the paid-tier entitlement.
+  controlItems.push({
+    key: "video-environment",
+    path: "/video-environment",
+    icon: <Wrench size={iconSize} strokeWidth={iconStroke} />,
+    labelKey: "nav.videoEnvironment",
+  });
+  controlItems.push({
+    key: "video-analysis",
+    path: "/video-analysis",
+    icon: <FileVideo size={iconSize} strokeWidth={iconStroke} />,
+    labelKey: "nav.videoAnalysis",
+    badge: "PRO",
+    disabled: !isPaidTierUser(user),
+    disabledReasonKey: "nav.videoAnalysisLockedHint",
+  });
   if (navAllowed(user, "workbench")) {
     controlItems.push({
       key: "workbench",

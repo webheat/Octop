@@ -5,7 +5,8 @@ import type { TFunction } from "i18next";
 import AvatarDropdown from "../components/AvatarDropdown";
 import AppVersionBadge from "../components/AppVersionBadge";
 import CurrentVersionBadge from "../components/CurrentVersionBadge";
-import { ArrowRightLeft, ChevronDown, X } from "lucide-react";
+import { Tooltip } from "antd";
+import { ArrowRightLeft, ChevronDown, Lock, X } from "lucide-react";
 import { stripBase, withBase } from "../utils/basePath";
 import { useTheme } from "../context/ThemeContext";
 import { useLayoutMode } from "../context/LayoutModeContext";
@@ -30,6 +31,7 @@ import {
   COLLAPSED_WIDTH,
   EXPANDED_WIDTH,
   buildNavSections,
+  hideTempNavItems,
   navSectionLabel,
   type NavItem,
   type NavSection,
@@ -145,6 +147,10 @@ function NavItemButton({
   hasUpdate: boolean;
   t: TFunction<"translation", undefined>;
 }) {
+  const locked = Boolean(item.disabled);
+  const lockedHint = locked
+    ? t(item.disabledReasonKey ?? "nav.videoAnalysisLockedHint")
+    : undefined;
   const showToggle = Boolean(
     showChatRailToggle && item.key === "chat" && onToggleChatRail,
   );
@@ -160,78 +166,84 @@ function NavItemButton({
       }}
       onMouseEnter={(e) => {
         prefetchRoute(item.path);
-        if (!active) {
+        if (!active && !locked) {
           e.currentTarget.style.background = "var(--fn-sidebar-item-hover)";
         }
       }}
       onMouseLeave={(e) => {
-        if (!active) {
+        if (!active && !locked) {
           e.currentTarget.style.background = "transparent";
         }
       }}
     >
-      <button
-        type="button"
-        className={styles.navItemMain}
-        onClick={() => onNavigate(item.path)}
-        style={{
-          color: active
-            ? "var(--fn-sidebar-item-active-text)"
-            : "var(--fn-text-secondary)",
-          fontSize: typeSize(14, isMobile),
-          fontWeight: active ? 500 : 400,
-          paddingRight: showToggle ? 4 : 12,
-        }}
-      >
-        <span
+      <Tooltip title={lockedHint} placement="right" mouseEnterDelay={0.2}>
+        <button
+          type="button"
+          aria-disabled={locked || undefined}
+          className={`${styles.navItemMain} ${
+            locked ? styles.navItemLocked : ""
+          }`}
+          onClick={() => onNavigate(item.path)}
           style={{
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
             color: active
               ? "var(--fn-sidebar-item-active-text)"
-              : "var(--fn-text-tertiary)",
+              : "var(--fn-text-secondary)",
+            fontSize: typeSize(14, isMobile),
+            fontWeight: active ? 500 : 400,
+            paddingRight: showToggle ? 4 : 12,
           }}
         >
-          {item.icon}
-        </span>
-        <span
-          style={{
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            minWidth: 0,
-          }}
-        >
-          {t(item.labelKey)}
-          {item.key === "admin-advanced" && role === "admin" && hasUpdate ? (
-            <span className={styles.navUpdateBadge}>
-              {t("nav.newVersionBadge", "有新版本")}
-            </span>
-          ) : null}
-          {item.badge && (
-            <span
-              className="nav-badge-new"
-              style={{
-                fontSize: typeSize(9, isMobile),
-                fontWeight: 600,
-                padding: "1px 4px",
-                borderRadius: "2px",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                textTransform: "uppercase",
-                lineHeight: 1.2,
-                letterSpacing: "0.5px",
-              }}
-            >
-              {item.badge}
-            </span>
-          )}
-        </span>
-      </button>
+          <span
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              color: active
+                ? "var(--fn-sidebar-item-active-text)"
+                : "var(--fn-text-tertiary)",
+            }}
+          >
+            {item.icon}
+          </span>
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              minWidth: 0,
+            }}
+          >
+            {t(item.labelKey)}
+            {locked && <Lock size={11} strokeWidth={1.8} aria-hidden />}
+            {item.key === "admin-advanced" && role === "admin" && hasUpdate ? (
+              <span className={styles.navUpdateBadge}>
+                {t("nav.newVersionBadge", "有新版本")}
+              </span>
+            ) : null}
+            {item.badge && (
+              <span
+                className="nav-badge-new"
+                style={{
+                  fontSize: typeSize(9, isMobile),
+                  fontWeight: 600,
+                  padding: "1px 4px",
+                  borderRadius: "2px",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                  textTransform: "uppercase",
+                  lineHeight: 1.2,
+                  letterSpacing: "0.5px",
+                }}
+              >
+                {item.badge}
+              </span>
+            )}
+          </span>
+        </button>
+      </Tooltip>
       {showToggle ? (
         <button
           type="button"
@@ -405,7 +417,7 @@ export default function Sidebar({
   const isMinimal = layoutMode === "minimal";
   const onChatPath = isChatPath(location.pathname);
   const catalog = useMemo(
-    () => buildNavSections(user, { mobileEnabled }),
+    () => hideTempNavItems(buildNavSections(user, { mobileEnabled })),
     [user, mobileEnabled],
   );
   const [savedLayout, setSavedLayout] = useState<SidebarNavLayout | null>(null);
