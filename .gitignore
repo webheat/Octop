@@ -135,3 +135,7 @@ remotion/example/out/
 
 # WorkBuddy 项目数据（artifacts 交付包 / memory / seed），不入仓库
 .workbuddy/
+
+# 桌面壳构建产物与本地 preview 运行数据（原 Octop-fdf worktree 里的未跟踪内容）
+/out/
+/.octop-preview/
