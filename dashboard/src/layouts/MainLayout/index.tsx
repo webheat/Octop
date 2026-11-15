@@ -1,6 +1,6 @@
 import { Layout } from "antd";
 import { lazy, Suspense, useEffect, useState, useCallback } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
 import RailEdgeControl from "../../components/RailEdgeControl";
@@ -28,6 +28,7 @@ import { useLayoutMode } from "../../context/LayoutModeContext";
 import { useDashboardPushToast } from "../../hooks/useDashboardPushToast";
 import { DesktopVideoJobsProvider } from "../../context/DesktopVideoJobsContext";
 import DesktopVideoGlobalStatus from "../../components/DesktopVideoGlobalStatus";
+import { useDesktopMinimalLanding } from "../../hooks/useDesktopMinimalMode";
 
 const Chat = lazy(() => import("../../pages/Chat"));
 const WorkbenchPage = lazy(() => import("../../pages/Control/Workbench"));
@@ -57,7 +58,9 @@ function ChatWithKey() {
 
 export default function MainLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const currentPath = location.pathname;
+  const desktopMinimal = useDesktopMinimalLanding(currentPath, navigate);
   const selectedKey = resolveSelectedKey(currentPath);
   const isMobile = useIsMobile();
   const { layoutMode } = useLayoutMode();
@@ -212,36 +215,38 @@ export default function MainLayout() {
               />
             )}
 
-            <div
-              style={{
-                position: "relative",
-                flexShrink: 0,
-                alignSelf: "stretch",
-                display: "flex",
-                minHeight: 0,
-              }}
-            >
-              <Sidebar
-                selectedKey={selectedKey}
-                collapsed={collapsed}
-                onToggle={toggleCollapsed}
-                isMobile={isMobile}
-              />
-              {!isMobile && (
-                <RailEdgeControl
-                  expanded={!collapsed}
-                  onToggle={handleNavRailToggle}
-                  side="end"
-                  placement={
-                    isChatRoute && !isMinimalLayout && !chatSidebarOpen
-                      ? "before"
-                      : "center"
-                  }
+            {!desktopMinimal && (
+              <div
+                style={{
+                  position: "relative",
+                  flexShrink: 0,
+                  alignSelf: "stretch",
+                  display: "flex",
+                  minHeight: 0,
+                }}
+              >
+                <Sidebar
+                  selectedKey={selectedKey}
+                  collapsed={collapsed}
+                  onToggle={toggleCollapsed}
+                  isMobile={isMobile}
                 />
-              )}
-            </div>
+                {!isMobile && (
+                  <RailEdgeControl
+                    expanded={!collapsed}
+                    onToggle={handleNavRailToggle}
+                    side="end"
+                    placement={
+                      isChatRoute && !isMinimalLayout && !chatSidebarOpen
+                        ? "before"
+                        : "center"
+                    }
+                  />
+                )}
+              </div>
+            )}
 
-            {isChatRoute && !isMinimalLayout && (
+            {!desktopMinimal && isChatRoute && !isMinimalLayout && (
               <div
                 id={CHAT_HISTORY_RAIL_ID}
                 style={{

@@ -84,6 +84,10 @@ type App struct {
 	pendingURL     string
 	video          *videoManager
 	videoNonce     string
+
+	// minimalLandingPath is the product-library path the shell keeps the
+	// browser on while minimal mode is enabled ("" when disabled).
+	minimalLandingPath string
 }
 
 func (a *App) ServiceName() string { return "desktop" }
@@ -331,7 +335,13 @@ func (a *App) showDashboard(base string) {
 	if a.window == nil {
 		return
 	}
-	a.navigate(base)
+	landing := minimalDashboardURL(base)
+	if landing != base {
+		a.mu.Lock()
+		a.minimalLandingPath = landingPath(landing)
+		a.mu.Unlock()
+	}
+	a.navigate(landing)
 	if a.video == nil {
 		a.video = newVideoManager(base)
 	}
@@ -402,6 +412,22 @@ func (a *App) installDragOverlay() {
 	a.window.ExecJS(dragOverlayJS())
 	a.window.ExecJS(fileDropJS())
 	a.installVideoBridge()
+	a.installMinimalMode()
+}
+
+// installMinimalMode hides the navigation rail for customer-facing shells.
+// It is a no-op unless the client was built (or started) in minimal mode.
+func (a *App) installMinimalMode() {
+	if a.window == nil || !minimalModeEnabled() {
+		return
+	}
+	a.mu.Lock()
+	landing := a.minimalLandingPath
+	a.mu.Unlock()
+	if landing == "" {
+		return
+	}
+	a.window.ExecJS(minimalModeJS(landing))
 }
 
 func (a *App) installVideoBridge() {

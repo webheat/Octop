@@ -35,6 +35,8 @@ export interface DesktopVideoJob {
 
 export interface DesktopVideoBridge {
   version: number;
+  /** Explicit opt-out for shells started with OCTOP_DESKTOP_MINIMAL=0. */
+  minimalMode?: boolean;
   environmentVersion?: number;
   environmentInstallerURL?: string;
   request: <T = unknown>(
