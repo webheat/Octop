@@ -21,6 +21,28 @@ def db(tmp_path: Path) -> SqlitePool:
     return pool
 
 
+def test_close_waits_for_in_flight_query(tmp_path: Path) -> None:
+    pool = SqlitePool(tmp_path / "octop.db")
+    entered = threading.Event()
+    result: dict[str, int] = {}
+
+    def query() -> None:
+        with pool.connect() as conn:
+            entered.set()
+            time.sleep(0.2)
+            result["row"] = int(conn.execute("SELECT 1").fetchone()[0])
+
+    worker = threading.Thread(target=query)
+    worker.start()
+    assert entered.wait(2)
+    pool.close()
+    worker.join(2)
+    assert not worker.is_alive()
+    assert result["row"] == 1
+    with pytest.raises(sqlite3.ProgrammingError), pool.connect():
+        pass
+
+
 def test_db_pool_creates_file(tmp_path: Path):
     db_path = tmp_path / "octop.db"
     SqlitePool(db_path)
@@ -33,6 +55,31 @@ def test_db_pool_file_is_0600(tmp_path: Path):
     SqlitePool(db_path)
     mode = db_path.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_close_waits_for_in_flight_connection(db: SqlitePool) -> None:
+    """Closing must not free the connection while another thread is inside it."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with db.connect() as conn:
+            started.set()
+            assert release.wait(timeout=5)
+            conn.execute("SELECT 1").fetchone()
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert started.wait(timeout=5)
+    closer = threading.Thread(target=db.close)
+    closer.start()
+    closer.join(timeout=0.2)
+    assert closer.is_alive()
+    release.set()
+    closer.join(timeout=5)
+    holder.join(timeout=5)
+    assert not closer.is_alive()
+    assert not holder.is_alive()
 
 
 def test_run_migrations_creates_tables(db: SqlitePool):
@@ -111,11 +158,23 @@ def test_run_migrations_idempotent(db: SqlitePool):
         sso_indexes = {
             r["name"] for r in conn.execute("PRAGMA index_list(sso_providers)").fetchall()
         }
-    assert v == 26
+    assert v == 27
     assert product is not None
     assert product["name"] == "Product"
     assert "login_failed_count" in cols
     assert "login_locked_until" in cols
+    assert {"mfa_version", "mfa_failed_count", "mfa_locked_until", "password_version"}.issubset(
+        cols
+    )
+    assert "last_login_at" in cols
+    assert {
+        "user_totp",
+        "user_webauthn_credentials",
+        "user_recovery_codes",
+        "auth_challenges",
+        "profile_avatars",
+        "control_files",
+    }.issubset(table_names)
     assert "preferences_json" in cols
     assert "permissions" in cols
     assert "workspace_root_dir" not in cols
@@ -237,7 +296,7 @@ def test_migration_002_idempotent_when_column_already_present(tmp_path: Path) ->
     with pool.connect() as conn:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
-    assert v == 26
+    assert v == 27
     assert "mcp_servers" in cron_cols
     assert "skill_packages" in {
         r["name"]
@@ -299,6 +358,11 @@ def test_migration_005_preserves_populated_users_and_constraints(tmp_path: Path)
             "permissions": "[]",
             "role_name": None,
             "avatar_icon": None,
+            "mfa_version": 0,
+            "mfa_failed_count": 0,
+            "mfa_locked_until": 0,
+            "password_version": 0,
+            "last_login_at": None,
         }
         assert dict(agent) == {
             "agent_id": "legacy-agent",
@@ -376,7 +440,7 @@ def test_stuck_version_6_without_permissions_column_is_repaired(tmp_path: Path) 
     with pool.connect() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         version = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
-    assert version == 26
+    assert version == 27
     assert "permissions" in cols
 
 
@@ -401,7 +465,7 @@ def test_schema_v10_without_projection_tables_is_repaired(tmp_path: Path) -> Non
         }
         kb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
         cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
-    assert version == 26
+    assert version == 27
     assert {"thread_messages", "thread_history_projection", "trajectory_events"}.issubset(
         table_names
     )
@@ -436,7 +500,7 @@ def test_ahead_of_max_schema_version_clamps_to_max(tmp_path: Path) -> None:
             r["name"]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert version == 26
+    assert version == 27
     assert "skill_package_id" in pkg_cols
     assert "published_expert_id" in pub_cols
     assert "user_invites" in invite_tables
@@ -475,13 +539,13 @@ def test_ahead_of_max_schema_version_repairs_product_library(tmp_path: Path) -> 
             "SELECT name FROM product_library_products WHERE product_id = 'product-1'"
         ).fetchone()
 
-    assert version == 26
+    assert version == 27
     assert {
         "product_library_products",
         "product_library_assets",
         "product_library_projects",
     }.issubset(tables)
-    assert version_after_repeat == 26
+    assert version_after_repeat == 27
     assert product is not None
     assert product["name"] == "Product"
     pool.close()
@@ -512,7 +576,7 @@ def test_upstream_v24_watermark_gets_product_library_reconcile(tmp_path: Path) -
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert version == 26
+    assert version == 27
     assert {
         "product_library_products",
         "product_library_assets",
@@ -571,6 +635,17 @@ def test_foreign_keys_enabled(db: SqlitePool):
     assert fk == 1
 
 
+def test_wal_synchronous_is_normal_only_on_windows(tmp_path: Path):
+    pool = SqlitePool(tmp_path / "octop.db")
+    with pool.connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        sync = conn.execute("PRAGMA synchronous").fetchone()[0]
+    pool.close()
+    assert mode == "wal"
+    # Windows: NORMAL (1). Elsewhere: SQLite default FULL (2).
+    assert sync == (1 if os.name == "nt" else 2)
+
+
 def test_pre_squash_schema_version_clamped_and_knowledge_tables_filled(
     tmp_path: Path,
 ) -> None:
@@ -598,7 +673,7 @@ def test_pre_squash_schema_version_clamped_and_knowledge_tables_filled(
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-    assert version == 26
+    assert version == 27
     assert "permissions" in user_cols
     assert {
         "published_experts",
@@ -804,7 +879,7 @@ def test_v14_to_v15_adds_sso_provider_kind_without_rebuilding(tmp_path: Path) ->
         bound = conn.execute(
             "SELECT sso_provider_id FROM users WHERE username = 'sso-admin'"
         ).fetchone()[0]
-    assert version == 26
+    assert version == 27
     assert int(row["id"]) == int(provider_id)
     assert row["kind"] == "oidc"
     assert row["extra"] == "{}"

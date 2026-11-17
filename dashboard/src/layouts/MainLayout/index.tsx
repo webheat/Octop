@@ -1,9 +1,8 @@
 import { Layout } from "antd";
 import { lazy, Suspense, useEffect, useState, useCallback } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
-import RailEdgeControl from "../../components/RailEdgeControl";
 import PageLoading from "../../components/PageLoading";
 import { ServiceRestartProvider } from "../../context/ServiceRestartContext";
 import { BackupOperationProvider } from "../../context/BackupOperationContext";
@@ -21,29 +20,30 @@ import { CHAT_HISTORY_RAIL_ID, isChatPath } from "../chatHistoryRail";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useKeyboardOffset } from "../../hooks/useKeyboardOffset";
 import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
-import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
+import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/chatRailEvents";
+import RailEdgeControl from "../../components/RailEdgeControl";
+import { useTranslation } from "react-i18next";
+import {
+  isMacPlatform,
+  railShortcutAria,
+  railShortcutLabel,
+} from "../../utils/railShortcuts";
+import { readNavCollapsed, writeNavCollapsed } from "../navCollapsed";
 import RequirePermission from "../../components/RequirePermission";
 import { routeNeedsPermission } from "../../utils/permissions";
 import { useLayoutMode } from "../../context/LayoutModeContext";
 import { useDashboardPushToast } from "../../hooks/useDashboardPushToast";
 import { DesktopVideoJobsProvider } from "../../context/DesktopVideoJobsContext";
 import DesktopVideoGlobalStatus from "../../components/DesktopVideoGlobalStatus";
+import { useRailShortcuts } from "../../hooks/useRailShortcuts";
 
 const Chat = lazy(() => import("../../pages/Chat"));
 const WorkbenchPage = lazy(() => import("../../pages/Control/Workbench"));
 
 const { Content } = Layout;
 
-const SIDEBAR_COLLAPSED_KEY = "octop:sidebar:collapsed";
-
 function getSavedCollapsed(): boolean {
-  try {
-    const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-    if (saved !== null) return saved === "true";
-  } catch {
-    // localStorage may be unavailable (e.g. private browsing restrictions)
-  }
-  return false; // Default: expanded on both desktop and mobile.
+  return readNavCollapsed();
 }
 
 /**
@@ -57,6 +57,8 @@ function ChatWithKey() {
 
 export default function MainLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { t } = useTranslation();
   const currentPath = location.pathname;
   const selectedKey = resolveSelectedKey(currentPath);
   const isMobile = useIsMobile();
@@ -82,11 +84,7 @@ export default function MainLayout() {
 
   const persistNavCollapsed = useCallback((next: boolean) => {
     setCollapsed(next);
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
-    } catch {
-      /* ignore */
-    }
+    writeNavCollapsed(next);
   }, []);
 
   /** Mobile header / overlay: simple nav toggle. */
@@ -95,9 +93,8 @@ export default function MainLayout() {
   }, [collapsed, persistNavCollapsed]);
 
   /**
-   * Desktop nav rail edge:
-   * - expand: open nav; if classic chat history is also closed, open both
-   * - collapse: collapse nav only
+   * Desktop nav edge, matching upstream: expanding the nav while the classic
+   * history rail is closed opens both; collapsing the nav leaves history alone.
    */
   const handleNavRailToggle = useCallback(() => {
     if (collapsed) {
@@ -117,6 +114,40 @@ export default function MainLayout() {
     setChatSidebarOpen,
   ]);
 
+  /**
+   * History rail toggle, shared by the nav row button, the rail's own edge
+   * pill and ⇧⌘B.
+   *
+   * Opening from anywhere else lands on /chat first: the rail only exists on
+   * that route (classic layout), so toggling it from /tasks would otherwise
+   * flip a boolean nobody can see.
+   */
+  const handleHistoryRailToggle = useCallback(() => {
+    if (isMinimalLayout) return; // Minimal has one rail; history lives inside it.
+    if (isChatPath(currentPath)) {
+      if (chatSidebarOpen) {
+        setChatSidebarOpen(false);
+        return;
+      }
+      // MainLayout's listener also re-opens the nav when it was collapsed.
+      window.dispatchEvent(new Event(EXPAND_CHAT_RAIL_EVENT));
+      return;
+    }
+    window.dispatchEvent(new Event(EXPAND_CHAT_RAIL_EVENT));
+    navigate("/chat");
+  }, [
+    chatSidebarOpen,
+    currentPath,
+    isMinimalLayout,
+    navigate,
+    setChatSidebarOpen,
+  ]);
+
+  useRailShortcuts({
+    onToggleNav: isMobile ? toggleCollapsed : handleNavRailToggle,
+    onToggleHistory: handleHistoryRailToggle,
+  });
+
   // When switching to mobile, always collapse; restore saved preference on desktop
   useEffect(() => {
     if (isMobile) {
@@ -125,6 +156,26 @@ export default function MainLayout() {
       setCollapsed(getSavedCollapsed());
     }
   }, [isMobile]);
+
+  // Escape closes whichever mobile rail is covering the page. Desktop rails
+  // stay put: there they are part of the layout, not an overlay.
+  useEffect(() => {
+    if (!isMobile) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Dialogs (and the composer's popovers) close first, on their own.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        return;
+      }
+      if (chatSidebarOpen && isChatPath(currentPath)) {
+        setChatSidebarOpen(false);
+        return;
+      }
+      if (!collapsed) setCollapsed(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [chatSidebarOpen, collapsed, currentPath, isMobile, setChatSidebarOpen]);
 
   // On mobile, collapse sidebar when navigating to a new page
   useEffect(() => {
@@ -237,6 +288,17 @@ export default function MainLayout() {
                       ? "before"
                       : "center"
                   }
+                  label={
+                    collapsed
+                      ? t("layout.expandNav", "展开导航栏")
+                      : t("layout.collapseNav", "收起导航栏")
+                  }
+                  hint={`${
+                    collapsed
+                      ? t("layout.expandNav", "展开导航栏")
+                      : t("layout.collapseNav", "收起导航栏")
+                  } (${railShortcutLabel("toggle-nav", isMacPlatform())})`}
+                  shortcut={railShortcutAria("toggle-nav")}
                 />
               )}
             </div>
