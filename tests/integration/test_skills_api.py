@@ -1013,8 +1013,10 @@ async def test_push_workspace_skill_to_package_copies_all_files(env: Any) -> Non
     assert pushed.json() == {"package_id": package_id, "slug": "workspace-demo"}
 
     package_root = srv.paths.skill_packages_dir / package_id / "skills"
-    assert (package_root / "workspace-demo" / "SKILL.md").read_text() == manifest
-    assert (package_root / "workspace-demo" / "scripts" / "run.sh").read_text() == "echo one\n"
+    assert (package_root / "workspace-demo" / "SKILL.md").read_text(encoding="utf-8") == manifest
+    assert (package_root / "workspace-demo" / "scripts" / "run.sh").read_text(
+        encoding="utf-8"
+    ) == "echo one\n"
 
     conflict = await c.post(
         f"/api/agents/{aid}/skills/workspace-demo/push-to-package",
@@ -1035,4 +1037,6 @@ async def test_push_workspace_skill_to_package_copies_all_files(env: Any) -> Non
         json={"package_id": package_id, "overwrite": True},
     )
     assert replaced.status_code == 200, replaced.text
-    assert (package_root / "workspace-demo" / "scripts" / "run.sh").read_text() == "echo two\n"
+    assert (package_root / "workspace-demo" / "scripts" / "run.sh").read_text(
+        encoding="utf-8"
+    ) == "echo two\n"

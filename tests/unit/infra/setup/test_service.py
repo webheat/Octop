@@ -321,13 +321,13 @@ def test_install_service_adds_resource_limits_to_existing_unit(
     monkeypatch.setattr(service_mod, "ensure_watchdog_units", lambda _rt: False)
     monkeypatch.setattr(service_mod, "_systemd_run", systemd_run)
     assert install_service(runtime) is True
-    guard = (dropins / service_mod.RESOURCE_DROPIN_NAME).read_text()
+    guard = (dropins / service_mod.RESOURCE_DROPIN_NAME).read_text(encoding="utf-8")
     assert "[Unit]\nStartLimitIntervalSec=600\nStartLimitBurst=10" in guard
     for setting in ("MemoryHigh=60%", "MemoryMax=75%", "MemorySwapMax=512M", "RestartSec=30"):
         assert setting in guard
     assert "OOMPolicy=kill" in guard
-    assert unit.read_text() == custom_unit
-    assert override.read_text() == "[Service]\nMemoryMax=4G\n"
+    assert unit.read_text(encoding="utf-8") == custom_unit
+    assert override.read_text(encoding="utf-8") == "[Service]\nMemoryMax=4G\n"
     assert calls == [("daemon-reload",)]
     assert install_service(runtime) is False
     assert calls == [("daemon-reload",)]
@@ -357,7 +357,7 @@ def test_resource_dropin_failure_does_not_block_restart(monkeypatch, tmp_path) -
     )
     restart_service(runtime)
     assert ("restart", "octop") in calls
-    assert "custom-launcher" in unit.read_text()
+    assert "custom-launcher" in unit.read_text(encoding="utf-8")
 
 
 def test_resource_dropin_skips_launchd(monkeypatch, tmp_path) -> None:

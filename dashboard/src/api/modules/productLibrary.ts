@@ -23,7 +23,20 @@ export interface ProductSnapshotAsset {
   content_hash: string;
 }
 
-export interface ProductAsset extends ProductSnapshotAsset {
+/** LLM-generated image content, persisted in SQLite by the backend. */
+export interface AssetDescription {
+  ai_description: string;
+  ai_tags: string[];
+  ai_status: "none" | "pending" | "ready" | "failed";
+  ai_error: string;
+  ai_model: string;
+  ai_content_hash: string;
+  ai_updated_at: number;
+}
+
+export interface ProductAsset
+  extends ProductSnapshotAsset,
+    Partial<AssetDescription> {
   product_id: string;
   active: number;
 }
@@ -154,6 +167,19 @@ export const productLibraryApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  describeAsset: (id: string) =>
+    request<ProductAsset>(`/product-library/assets/${id}/describe`, {
+      method: "POST",
+    }),
+  describeMissing: (productId: string) =>
+    request<{
+      total: number;
+      succeeded: number;
+      failed: number;
+      items: ProductAsset[];
+    }>(`/product-library/products/${productId}/describe-missing`, {
+      method: "POST",
+    }),
   downloadAsset: (id: string) =>
     requestBlob(`/product-library/assets/${id}/download`),
   projects: () =>
@@ -194,10 +220,7 @@ export const productLibraryApi = {
     ),
   saveStoryboard: (
     projectId: string,
-    body: Pick<
-      StoryboardDraft,
-      "request" | "script" | "confirmed"
-    > &
+    body: Pick<StoryboardDraft, "request" | "script" | "confirmed"> &
       Partial<
         Pick<
           StoryboardDraft,

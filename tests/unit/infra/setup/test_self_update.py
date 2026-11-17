@@ -254,7 +254,7 @@ def test_stash_console_scripts_moves_launcher_and_purges_leftovers(
     assert moved == [(script_dir / "octop.exe", script_dir / "octop.exe.octop-old")]
     assert not (script_dir / "octop.exe").exists()
     # The leftover from an earlier upgrade is gone, replaced by the new stash.
-    assert (script_dir / "octop.exe.octop-old").read_text() == "launcher"
+    assert (script_dir / "octop.exe.octop-old").read_text(encoding="utf-8") == "launcher"
     assert (script_dir / "pip.exe").exists()
 
 
@@ -268,7 +268,7 @@ def test_restore_console_scripts_puts_launcher_back(
 
     restore_console_scripts(moved)
 
-    assert (script_dir / "octop.exe").read_text() == "launcher"
+    assert (script_dir / "octop.exe").read_text(encoding="utf-8") == "launcher"
     assert not (script_dir / "octop.exe.octop-old").exists()
 
 
@@ -300,7 +300,7 @@ def test_run_upgrade_restores_launcher_only_on_failure(
 
     assert result.success is success
     expected = "new launcher" if success else "launcher"
-    assert (script_dir / "octop.exe").read_text() == expected
+    assert (script_dir / "octop.exe").read_text(encoding="utf-8") == expected
     assert not (script_dir / "octop.exe.octop-old").exists()
 
 

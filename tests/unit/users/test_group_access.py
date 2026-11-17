@@ -17,6 +17,9 @@ from octop.infra.users.groups import (
     model_ref_allowed,
 )
 
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS_DIR.glob("*.sql"))
+
 
 @pytest.fixture
 def repos(tmp_path: Path) -> RepoBundle:
@@ -36,7 +39,7 @@ def test_schema_version_includes_user_groups(repos: RepoBundle) -> None:
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert version == 27
+    assert version == MAX_SCHEMA_VERSION
     assert {"user_group", "user_group_member", "resource_group_grant"}.issubset(names)
 
 

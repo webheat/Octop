@@ -64,7 +64,7 @@ async def test_login_isolated_idempotent_and_revoked(cli: Path) -> None:
     assert started["verification_url"] == "https://auth.agent.qq.com/device?user_code=TEST-CODE"
     assert started["user_code"] == "TEST-CODE"
     assert await agently_auth.authorize(first, "start") == started
-    assert (cli / "first" / "calls").read_text().splitlines().count("login") == 1
+    assert (cli / "first" / "calls").read_text(encoding="utf-8").splitlines().count("login") == 1
     assert (await agently_auth.authorize(second, "status"))["status"] == "idle"
     (cli / "first" / "authorized").touch()
     task = agently_auth._sessions[agently_auth._key("agently-cli", first)].task

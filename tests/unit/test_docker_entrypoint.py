@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import platform
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,10 +13,11 @@ import pytest
 from octop.infra.errors import OctopError
 from octop.infra.setup.password_file import read_password
 from octop.infra.users.password import _COMMON_PASSWORDS, validate_password_policy
+from tests.support.bash import resolve_bash as _resolve_bash
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="bash entrypoint helpers")
 # Same tests, but runnable anywhere a bash is on PATH (e.g. Git Bash on Windows).
-bash_exe = shutil.which("bash")
+bash_exe = _resolve_bash()
 bash_only = pytest.mark.skipif(bash_exe is None, reason="requires a bash shell")
 
 REPO = Path(__file__).resolve().parents[2]

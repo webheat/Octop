@@ -14,6 +14,9 @@ from octop.infra.db.migrate import run_migrations
 from octop.infra.db.pool import SqlitePool
 from octop.infra.db.repos.agents import AgentRow
 
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS_DIR.glob("*.sql"))
+
 
 def test_extract_profile_from_config_lifts_legacy_keys() -> None:
     profile = extract_profile_from_config(
@@ -90,7 +93,7 @@ def test_migration_007_backfills_profile_columns(tmp_path: Path) -> None:
             (
                 Path(__file__).resolve().parents[3]
                 / "src/octop/infra/db/migrations/001_initial.sql"
-            ).read_text()
+            ).read_text(encoding="utf-8")
         )
         conn.execute("UPDATE _schema_version SET version = 6")
         conn.execute(
@@ -119,7 +122,7 @@ def test_migration_007_backfills_profile_columns(tmp_path: Path) -> None:
     with pool.connect() as conn:
         version = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         row = conn.execute("SELECT * FROM agents WHERE agent_id = ?", ("ag1",)).fetchone()
-    assert version == 27
+    assert version == MAX_SCHEMA_VERSION
     assert row["template_name"] == "general-assistant"
     assert row["icon_name"] == "zap"
     assert row["icon_url"] == "https://cdn.example.com/a.png"
@@ -141,7 +144,7 @@ def test_legacy_zh_en_welcome_collapses_to_single_column(tmp_path: Path) -> None
             (
                 Path(__file__).resolve().parents[3]
                 / "src/octop/infra/db/migrations/001_initial.sql"
-            ).read_text()
+            ).read_text(encoding="utf-8")
         )
         conn.execute("ALTER TABLE agents ADD COLUMN welcome_message_zh TEXT")
         conn.execute("ALTER TABLE agents ADD COLUMN welcome_message_en TEXT")

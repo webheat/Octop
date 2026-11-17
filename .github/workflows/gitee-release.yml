@@ -3,9 +3,12 @@ name: Gitee Release
 # 把某个 v* GitHub Release 上的合规产物发布到 Gitee。
 #
 # Gitee 单个附件上限 100 MB：完整客户端安装器（~300 MB）和 portable 运行时
-# （~290 MB）都超限，因此只挂 slim 客户端（~20 MB，首次启动从 GitHub Release
-# 下载运行时）、wheel / sdist 和 fnos-docker 包；超限的产物在 Release 说明里
-# 给外链。
+# （~290 MB）都超限，留在 GitHub Release 上，超限的产物在 Release 说明里给外链。
+#
+# Gitee 上只挂"远程版读者要装的东西"：客户端本身 + 视频制作组件。slim 客户端
+# （首次启动要另外下载运行时）与 wheel / sdist 不在这里分发 —— 下载页与 Release
+# 说明都不提供它们，传上去只会多出没人链接的附件。判定规则见
+# scripts/gitee/assets.py。
 #
 # 本轮只发 Windows 版（见 docs/desktop-windows-build.md）：macOS 与 Linux 的
 # 产物不上传。用 platform 输入改成 all 可以发全平台。
@@ -76,83 +79,20 @@ jobs:
           [[ -n "${{ inputs.gitee_owner }}" ]] || { echo "::error::gitee_owner is empty" >&2; exit 1; }
           [[ -n "${{ inputs.gitee_repo }}" ]] || { echo "::error::gitee_repo is empty" >&2; exit 1; }
 
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-          PLATFORM: ${{ inputs.platform || 'windows' }}
-        run: |
-          set -euo pipefail
-          mkdir -p release-assets
-          # Gitee caps one attachment at 100 MB: only the small assets go there.
-          # The full client and the portable runtime stay on the GitHub Release
-          # and are linked from the release notes.
-          # This round ships one platform (Windows by default), so the assets of
-          # the other platforms are left out as well.
-          #
-          # Gitee only carries what a remote-client user installs: the client
-          # itself plus the video components. The slim installer and the Python
-          # packages are not distributed here — they would only lengthen the
-          # download list, and the release notes no longer mention them.
-          EXCLUDE='select(.name | test("slim|\\.whl$|\\.tar\\.gz$") | not)'
-          if [[ "${PLATFORM}" == "all" ]]; then
-            jq_filter=".assets[] | select(.size < 104857600) | ${EXCLUDE} | .name"
-          else
-            jq_filter=".assets[] | select(.size < 104857600) | ${EXCLUDE} | select((.name | test(\"windows|darwin|linux\") | not) or (.name | test(\"${PLATFORM}\"))) | .name"
-          fi
-          mapfile -t names < <(
-            gh release view "${{ inputs.tag }}" --repo "${SOURCE_REPO}" --json assets \
-              --jq "${jq_filter}"
-          )
-          if [[ ${#names[@]} -eq 0 ]]; then
-            echo "::error::the release has no asset under 100 MB for platform ${PLATFORM}" >&2
-            exit 1
-          fi
-          args=(
-            release download "${{ inputs.tag }}"
-            --repo "${SOURCE_REPO}"
-            --dir release-assets
-            --clobber
-          )
-          for name in "${names[@]}"; do
-            echo "  ${name}"
-            args+=(--pattern "$name")
-          done
-          gh "${args[@]}"
-          ls -lh release-assets/
-
-      - name: Build release notes
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-          PLATFORM: ${{ inputs.platform || 'windows' }}
-        run: |
-          set -euo pipefail
-          python3 scripts/gitee/release_notes.py \
-            --repo "${SOURCE_REPO}" \
-            --tag "${{ inputs.tag }}" \
-            --platform "${PLATFORM}" \
-            --out release-notes.md
-          head -40 release-notes.md
-
-      # The download page is the Gitee repository's only content: the release
-      # tag points at the commit that carries it.
-      - name: Sync the download page
-        id: readme
-        run: |
-          set -euo pipefail
-          sha="$(python3 scripts/gitee/push_readme.py \
-            --owner "${{ inputs.gitee_owner }}" \
-            --repo "${{ inputs.gitee_repo }}" \
-            --token "${GITEE_TOKEN}")"
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
-
       - name: Publish to Gitee
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          SOURCE_REPO: ${{ inputs.source_repo || github.repository }}
         run: |
           set -euo pipefail
-          bash scripts/gitee/publish_release.sh \
+          # One implementation, so CI and a local run cannot drift apart:
+          # download the assets → build the notes → sync the download page →
+          # create the Gitee release and upload. Which assets Gitee carries is
+          # decided in scripts/gitee/assets.py.
+          bash scripts/gitee/publish_from_github.sh \
             --tag "${{ inputs.tag }}" \
+            --source-repo "${SOURCE_REPO}" \
             --owner "${{ inputs.gitee_owner }}" \
             --repo "${{ inputs.gitee_repo }}" \
-            --token "${GITEE_TOKEN}" \
-            --assets-dir release-assets \
-            --body-file release-notes.md \
-            --base-sha "${{ steps.readme.outputs.sha }}"
+            --platform "${{ inputs.platform || 'windows' }}"

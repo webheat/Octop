@@ -58,21 +58,23 @@ Gitee Release 附件（都 < 100 MB）：
 
 | 附件 | 体积 | 说明 |
 |---|---|---|
-| `Octop-desktop-<plat>-<ver>.<ext>` | ~18 MB | 远程版客户端，连接已部署的服务 |
-| `Octop-desktop-slim-<plat>-<ver>.<ext>` | ~20 MB | 本地版客户端，首次启动下载运行时 |
-| `octop-<ver>-py3-none-any.whl` | ~22 MB | Python wheel |
-| `octop-<ver>.tar.gz` | ~21 MB | sdist |
-| `Octop-fnos-docker-<ver>.fpk` | 0.3 MB | fnOS Docker 版 |
+| `Octop-desktop-<plat>-<ver>.<ext>` | ~6 MB | 远程版客户端，连接已部署的服务 |
+| `Octop-video-components-<plat>-<ver>.<ext>` | ~71 MB | 视频制作组件，远程版客户端出片必装 |
 
 **本轮只出 Windows 版**（amd64 / arm64）。macOS 与 Linux 的客户端本轮不构建、
 不发布——构建说明见 [desktop-windows-build.md](desktop-windows-build.md)。
 
-**不上传**（超限，Release 说明里给外链）：内嵌运行时的完整桌面安装器、
-portable 运行时、fnOS native 包。外链指向 GitHub Release。
+**不在 Gitee 分发**：
 
-> 附件的取舍规则是**按大小**（< 100 MB）**加平台**（本轮只发 Windows）：完整安装器
-> 如果哪天做到了 100 MB 以内，它也会被带上；平台过滤用 `--platform` 调，
-> `--platform all` 可发全平台。wheel / sdist / fnOS 包不带平台名，一直都发。
+- `Octop-desktop-slim-...`（本地版客户端，首次启动要另外下载运行时）——
+  Gitee 这边只服务"远程版读者"，下载页与 Release 说明都不提供它
+- `octop-*.whl` / `octop-*.tar.gz`（Python 包）—— 走 PyPI
+- 内嵌运行时的完整桌面安装器、portable 运行时、fnOS native 包（超限）——
+  留在 GitHub Release，Release 说明里给外链
+
+> 附件的取舍规则只有一处实现：`scripts/gitee/assets.py`。CI 与本地手工发布
+> 都调同一套脚本（`scripts/gitee/publish_from_github.sh`），所以两边不会选出
+> 不同的附件。改规则只改那一个文件。
 
 ## 三、前置条件
 
@@ -98,7 +100,8 @@ octop_client/                ← Gitee：只有 README.md / README.en.md（下�
 GitHub / CNB。
 
 下载页由 `scripts/gitee/push_readme.py` 通过 Gitee contents API 写入（CI 里不需要
-SSH 密钥），**内容没变就不产生新 commit**；Release 的 tag 指向下载页所在的 commit，
+SSH 密钥）。内容是**按本次发布渲染的模板**（见上面"分步执行"下面的说明），
+**内容没变就不产生新 commit**；Release 的 tag 指向下载页所在的 commit，
 所以 Release 页面看到的是一份可读的下载页，而不是一个无关的初始提交。
 
 ### 2. 仓库 Secrets
@@ -163,14 +166,20 @@ export GITEE_TOKEN=...
 
 # 1. 同步下载页，拿到 commit
 sha="$(python3 scripts/gitee/push_readme.py \
-  --owner webheat --repo octop_client --token "$GITEE_TOKEN")"
+  --owner webheat --repo octop_client --tag v1.4.0-gitee.1 --token "$GITEE_TOKEN")"
 
 # 2. 建 Release 并上传
 scripts/gitee/publish_release.sh \
-  --tag v1.4.0 --owner webheat --repo octop_client --token "$GITEE_TOKEN" \
+  --tag v1.4.0-gitee.1 --owner webheat --repo octop_client --token "$GITEE_TOKEN" \
   --assets-dir release-assets --body-file release-notes.md \
   --base-sha "$sha"
 ```
+
+> **下载页是模板，必须传 `--tag`。** `REPO_README*.md` 里的下载链接写成
+> `{{TAG}}` / `{{VERSION}}` / `{{OWNER}}` / `{{REPO}}` / `{{GITEE_WEB}}` 占位符，
+> 由 `push_readme.py` 按本次发布渲染。渲染后如果页面里还出现**别的** tag 或版本号，
+> 脚本直接中止并点名是哪一个 —— 否则新 Release 的页面会安静地指向旧安装器，
+> 而因为内容与线上完全一致，连一次提交都不会产生，根本看不出来。
 
 ## 五、限制与注意事项
 

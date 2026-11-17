@@ -3,10 +3,8 @@
 Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，单进程部署，不需要额外的
 队列或中间件。本仓库用于分发 **Octop 桌面客户端** 的发行产物。
 
-> 源码不在本仓库。源码见 [GitHub](https://github.com/zhuimeng2026-hub/Octop) /
-> [CNB](https://cnb.cool/mengxa.com/Octop)；上游项目见
-> [TencentCloud/Octop](https://github.com/TencentCloud/Octop)。
-> 本仓库只放下载页与 Release 产物。
+> 源码不在本仓库。源码见 [GitHub](https://github.com/TencentCloud/Octop) /
+> [CNB](https://cnb.cool/mengxa.com/Octop)，本仓库只放下载页与 Release 产物。
 
 ## 装两步就能用
 
@@ -23,10 +21,10 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 
 | 系统 | 下载 | 体积 |
 |---|---|---|
-| Windows 10/11 x64 | [Octop-desktop-windows-amd64-{{ASSET_VERSION}}.exe]({{BASE_URL}}/Octop-desktop-windows-amd64-{{ASSET_VERSION}}.exe) | ~6 MB |
-| Windows on ARM（骁龙本等） | [Octop-desktop-windows-arm64-{{ASSET_VERSION}}.exe]({{BASE_URL}}/Octop-desktop-windows-arm64-{{ASSET_VERSION}}.exe) | ~5.5 MB |
+| Windows 10/11 x64 | [Octop-desktop-windows-amd64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-amd64-{{VERSION}}.exe) | ~6 MB |
+| Windows on ARM（骁龙本等） | [Octop-desktop-windows-arm64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-arm64-{{VERSION}}.exe) | ~5.5 MB |
 
-全部发行版本见 [Releases](https://gitee.com/webheat/octop_client/releases)。
+全部发行版本见 [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases)。
 远程版打开后直连 <https://ocbot.aixifs.com/videogen>。
 
 ## 2. 视频制作组件（必装）
@@ -36,7 +34,7 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 
 | 组件 | 体积 | 下载 |
 |---|---|---|
-| **视频制作组件（Windows x64）** | ~71 MB | [Octop-video-components-windows-x64-{{ASSET_VERSION}}.exe]({{BASE_URL}}/Octop-video-components-windows-x64-{{ASSET_VERSION}}.exe) |
+| **视频制作组件（Windows x64）** | ~71 MB | [下载]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-video-components-windows-x64-{{VERSION}}.exe) |
 
 安装步骤：
 
@@ -47,35 +45,16 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 
 客户端里也有同样的下载按钮，地址取不到时才提示联系管理员。
 
-## 3. 为什么只有远程版
+## 要自己跑一套服务？
 
-Gitee 单个附件上限 100 MB：
-
-| 形态 | 体积 | 在哪 |
-|---|---|---|
-| 远程版客户端（本页提供） | ~6 MB | ✅ 本仓库 Release |
-| 视频制作组件 | ~71 MB | ✅ 本仓库 Release |
-| slim 本地版（自带运行时） | 200 MB 起 | ❌ 超限，见 [GitHub Release](https://github.com/zhuimeng2026-hub/Octop/releases) |
-| 完整离线包 | 200–340 MB | ❌ 超限，同上 |
-
-⚠️ 运行时本体（约 290 MB）超过附件上限，只在 GitHub Release 上提供。
-**运行时 URL 是编译期写死进 exe 的**：装上旧客户端不会自动升级到新运行时，
-升级必须装新版客户端；slim 版首启需要联网。
-
-## 4. 已知问题
-
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| Windows 提示「未知发布者」 | 本构建未做代码签名 | 「更多信息 → 仍要运行」 |
-| 下载要填验证码 | Gitee 防盗链 | 正常填写；批量分发前先确认用户能下 |
-| slim 首启拉不到运行时 | 运行时必须先于客户端发布 | 见 GitHub Release；本仓库只发远程版 |
-| 组件装完「重新检测」不通过 | 装到了别的目录 | 用默认选项重装，确认 `%LOCALAPPDATA%\Octop\video-runtime` 存在 |
-| 组件是 ARM64 系统要用 | 组件只提供 x64 版 | x64 版在 Windows on ARM 上可仿真运行，性能打折，需实测 |
+本页只放远程版客户端。自带 Python 运行时的本地版安装包体积 200 MB 起，
+超过 Gitee 单附件 100 MB 的上限，因此不在本仓库分发。
+需要离线或私有部署时，按源码仓库的部署文档自行安装即可。
 
 ## 文档
 
-- 使用文档与部署指南：<https://github.com/zhuimeng2026-hub/Octop/tree/main/docs>
-- API 参考：<https://github.com/zhuimeng2026-hub/Octop/blob/main/docs/api.md>
+- 使用文档与部署指南：<https://github.com/TencentCloud/Octop/tree/main/docs>
+- API 参考：<https://github.com/TencentCloud/Octop/blob/main/docs/api.md>
 
 ## 许可
 

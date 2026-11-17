@@ -29,10 +29,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from assets import GITEE_ATTACHMENT_LIMIT_MB, select  # noqa: E402
 from github import fetch_release  # noqa: E402
 
-DOWNLOAD_BASE = "https://github.com/{repo}/releases/download/{tag}"
+DOWNLOAD_BASE = os.environ.get(
+    "GITHUB_DOWNLOAD_BASE", "https://github.com/{repo}/releases/download/{tag}"
+)
 # Assets that fit a Gitee attachment are served from Gitee itself, so the
 # notes link to Gitee and never send the reader to GitHub for them.
-GITEE_DOWNLOAD_BASE = "https://gitee.com/{owner}/{repo}/releases/download/{tag}"
+GITEE_DOWNLOAD_BASE = os.environ.get(
+    "GITEE_DOWNLOAD_BASE", "https://gitee.com/{owner}/{repo}/releases/download/{tag}"
+)
 
 # How the architecture token in a file name reads to a human.
 ARCH_LABELS = {

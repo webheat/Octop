@@ -1,5 +1,9 @@
 import { lazy } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import {
+  DESKTOP_MINIMAL_LANDING,
+  useDesktopMinimalMode,
+} from "../hooks/useDesktopMinimalMode";
 
 // Lazy-loaded pages — Common
 const ExpertsPage = lazy(() => import("../pages/Experts"));
@@ -17,6 +21,8 @@ const PersonalizationPage = lazy(
 );
 const ACPPage = lazy(() => import("../pages/Agent/ACP"));
 const TokenUsagePage = lazy(() => import("../pages/Control/TokenUsage"));
+const VideoEnvironmentPage = lazy(() => import("../pages/VideoEnvironment"));
+const VideoAnalysisPage = lazy(() => import("../pages/VideoAnalysis"));
 
 // Lazy-loaded pages — Control
 const RemoteDesktopPage = lazy(() => import("../pages/Control/RemoteDesktop"));
@@ -43,6 +49,14 @@ function RedirectPreserveSearch({ to }: { to: string }) {
   return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
 }
 
+/** Root landing: the customer-facing desktop shell opens the product library. */
+function HomeRedirect() {
+  const desktopMinimal = useDesktopMinimalMode();
+  return (
+    <Navigate to={desktopMinimal ? DESKTOP_MINIMAL_LANDING : "/chat"} replace />
+  );
+}
+
 export interface RouteConfig {
   path: string;
   element: React.ReactNode;
@@ -60,6 +74,8 @@ export const pathToKey: Record<string, string> = {
   "/knowledge-bases": "knowledge-bases",
   "/product-library": "product-library",
   "/product-library/video-wizard": "product-library",
+  "/video-environment": "video-environment",
+  "/video-analysis": "video-analysis",
   "/bridge": "bridge",
   "/personalization": "personalization",
   "/personalization/skills": "personalization",
@@ -168,6 +184,8 @@ export const routeConfigs: RouteConfig[] = [
     path: "/product-library/video-wizard",
     element: <ProductVideoWizardPage />,
   },
+  { path: "/video-environment", element: <VideoEnvironmentPage /> },
+  { path: "/video-analysis", element: <VideoAnalysisPage /> },
   { path: "/bridge", element: <BridgePage /> },
   {
     path: "/personalization/acp",
@@ -299,6 +317,6 @@ export const routeConfigs: RouteConfig[] = [
 
   // Misc
   { path: "/pwa-debug", element: <PwaDebugPage /> },
-  { path: "/", element: <Navigate to="/chat" replace /> },
+  { path: "/", element: <HomeRedirect /> },
   { path: "*", element: <NotFoundPage /> },
 ];

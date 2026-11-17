@@ -265,7 +265,7 @@ def test_download_confined_and_encoded(
     )
     assert base64.b64decode(output["result"]["content_base64"]) == b"download"
     assert "saved_to" not in output["result"]["data"]
-    assert secret.read_text() == "private"
+    assert secret.read_text(encoding="utf-8") == "private"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX symlink semantics")

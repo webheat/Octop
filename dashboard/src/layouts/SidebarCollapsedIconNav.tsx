@@ -24,6 +24,7 @@ export default function SidebarCollapsedIconNav({
     <div className={styles.collapsedNav}>
       {items.map((item) => {
         const active = selectedKey === item.key;
+        const locked = Boolean(item.disabled);
         const showUpdateBadge =
           item.key === "admin-advanced" && role === "admin" && hasUpdate;
         return (
@@ -35,6 +36,12 @@ export default function SidebarCollapsedIconNav({
                 : item.badge
                 ? ` (${item.badge})`
                 : ""
+            }${
+              locked
+                ? ` · ${t(
+                    item.disabledReasonKey ?? "nav.videoAnalysisLockedHint",
+                  )}`
+                : ""
             }`}
             placement="right"
             mouseEnterDelay={0.2}
@@ -42,15 +49,16 @@ export default function SidebarCollapsedIconNav({
             <button
               type="button"
               data-nav-key={item.key}
-              className={
-                active
-                  ? `${styles.collapsedNavBtn} ${styles.collapsedNavBtnActive}`
-                  : styles.collapsedNavBtn
-              }
-              onClick={() => onNavigate(item.path)}
-              onMouseEnter={() => prefetchRoute(item.path)}
+              className={cx(
+                styles.collapsedNavBtn,
+                active && styles.collapsedNavBtnActive,
+                locked && styles.navItemLocked,
+              )}
+              aria-disabled={locked || undefined}
               aria-label={t(item.labelKey)}
               aria-current={active ? "page" : undefined}
+              onClick={() => onNavigate(item.path)}
+              onMouseEnter={() => prefetchRoute(item.path)}
             >
               {item.icon}
               {showUpdateBadge ? (

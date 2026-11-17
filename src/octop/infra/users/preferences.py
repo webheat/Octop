@@ -36,6 +36,8 @@ SIDEBAR_NAV_KEYS = frozenset(
         "workbench",
         "remote-desktop",
         "acp",
+        "video-environment",
+        "video-analysis",
         "admin-users",
         "models",
         "admin-storage",

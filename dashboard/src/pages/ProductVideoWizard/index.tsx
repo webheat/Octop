@@ -161,7 +161,11 @@ export default function ProductVideoWizardPage() {
     desktopVideo.bridgeAvailable || window.octopDesktopVideo?.version === 1;
   const requestedProjectId = params.get("project");
   const requestedProductId = params.get("product");
-  const routeSelection = location.state as { productId?: string; assetIds?: string[]; ownerId?: number | string } | null;
+  const routeSelection = location.state as {
+    productId?: string;
+    assetIds?: string[];
+    ownerId?: number | string;
+  } | null;
   const hasOwnedRouteSelection = Boolean(
     routeSelection &&
       userId != null &&
@@ -379,7 +383,9 @@ export default function ProductVideoWizardPage() {
           const routeProductId = hasOwnedRouteSelection
             ? routeSelection?.productId
             : requestedProductId;
-          const routedProduct = p.items.find((item) => item.id === routeProductId);
+          const routedProduct = p.items.find(
+            (item) => item.id === routeProductId,
+          );
           if (routedProduct) {
             setProduct(routedProduct);
             productIdRef.current = routedProduct.id;
@@ -427,14 +433,21 @@ export default function ProductVideoWizardPage() {
         setAssetLoadFailed(false);
         setAssets(items);
         const available = items.filter(
-          (asset) => asset.product_id === id && asset.active && asset.usage === "scene" && mediaType(asset),
+          (asset) =>
+            asset.product_id === id &&
+            asset.active &&
+            asset.usage === "scene" &&
+            mediaType(asset),
         );
-        const explicitIds = hasOwnedRouteSelection && routeSelection?.productId === id
-          ? routeSelection.assetIds
-          : undefined;
+        const explicitIds =
+          hasOwnedRouteSelection && routeSelection?.productId === id
+            ? routeSelection.assetIds
+            : undefined;
         setSelectedAssetIds(
           explicitIds
-            ? available.filter((asset) => explicitIds.includes(asset.id)).map((asset) => asset.id)
+            ? available
+                .filter((asset) => explicitIds.includes(asset.id))
+                .map((asset) => asset.id)
             : available.map((asset) => asset.id),
         );
       })
@@ -447,7 +460,13 @@ export default function ProductVideoWizardPage() {
     return () => {
       current = false;
     };
-  }, [product?.id, project?.id, assetRetry, hasOwnedRouteSelection, location.key]);
+  }, [
+    product?.id,
+    project?.id,
+    assetRetry,
+    hasOwnedRouteSelection,
+    location.key,
+  ]);
 
   const allSnapshotSceneAssets = useMemo(
     () =>
@@ -620,32 +639,68 @@ export default function ProductVideoWizardPage() {
     setUploadBusy(true);
     setError("");
     try {
-    for (const [index, file] of batch.entries()) {
-      if (productIdRef.current !== id || requestVersion.current !== version) break;
-      setUploadProgress(t("videoWizard.uploadProgress", { done: index, total: batch.length }));
-      try {
-        const result = await productLibraryApi.upload(id, [file], "scene");
-        if (productIdRef.current !== id || requestVersion.current !== version) break;
-        uploadedIds.push(...result.items.filter((asset) => !existingIds.has(asset.id) && asset.active && asset.usage === "scene" && mediaType(asset)).map((asset) => asset.id));
-        succeeded += 1;
-        setUploads((current) => current.filter((item) => item !== file));
-      } catch {
-        // Keep failed entries in the queue for an explicit retry.
+      for (const [index, file] of batch.entries()) {
+        if (productIdRef.current !== id || requestVersion.current !== version)
+          break;
+        setUploadProgress(
+          t("videoWizard.uploadProgress", { done: index, total: batch.length }),
+        );
+        try {
+          const result = await productLibraryApi.upload(id, [file], "scene");
+          if (productIdRef.current !== id || requestVersion.current !== version)
+            break;
+          uploadedIds.push(
+            ...result.items
+              .filter(
+                (asset) =>
+                  !existingIds.has(asset.id) &&
+                  asset.active &&
+                  asset.usage === "scene" &&
+                  mediaType(asset),
+              )
+              .map((asset) => asset.id),
+          );
+          succeeded += 1;
+          setUploads((current) => current.filter((item) => item !== file));
+        } catch {
+          // Keep failed entries in the queue for an explicit retry.
+        }
       }
-    }
-    if (productIdRef.current === id && requestVersion.current === version) {
-      try {
-        const loaded = await productLibraryApi.assets(id);
-        if (productIdRef.current !== id || requestVersion.current !== version) return;
-        setAssets(loaded.items);
-        const valid = new Set(loaded.items.filter((asset) => asset.active && asset.usage === "scene" && mediaType(asset)).map((asset) => asset.id));
-        setSelectedAssetIds((current) => [...new Set([...current.filter((assetId) => valid.has(assetId)), ...uploadedIds.filter((assetId) => valid.has(assetId))])]);
-        if (succeeded) message.success(t("videoWizard.uploadedCount", { count: succeeded }));
-        if (batch.length > succeeded) setError(t("videoWizard.uploadFailedCount", { count: batch.length - succeeded }));
-      } catch {
-        if (productIdRef.current === id && requestVersion.current === version) setError(t("videoWizard.uploadFailed"));
+      if (productIdRef.current === id && requestVersion.current === version) {
+        try {
+          const loaded = await productLibraryApi.assets(id);
+          if (productIdRef.current !== id || requestVersion.current !== version)
+            return;
+          setAssets(loaded.items);
+          const valid = new Set(
+            loaded.items
+              .filter(
+                (asset) =>
+                  asset.active && asset.usage === "scene" && mediaType(asset),
+              )
+              .map((asset) => asset.id),
+          );
+          setSelectedAssetIds((current) => [
+            ...new Set([
+              ...current.filter((assetId) => valid.has(assetId)),
+              ...uploadedIds.filter((assetId) => valid.has(assetId)),
+            ]),
+          ]);
+          if (succeeded)
+            message.success(
+              t("videoWizard.uploadedCount", { count: succeeded }),
+            );
+          if (batch.length > succeeded)
+            setError(
+              t("videoWizard.uploadFailedCount", {
+                count: batch.length - succeeded,
+              }),
+            );
+        } catch {
+          if (productIdRef.current === id && requestVersion.current === version)
+            setError(t("videoWizard.uploadFailed"));
+        }
       }
-    }
     } finally {
       if (productIdRef.current === id && requestVersion.current === version) {
         setUploadBusy(false);
@@ -1240,7 +1295,11 @@ export default function ProductVideoWizardPage() {
                             multiple
                             accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.avif,.mp4,.webm,.mov,.m4v"
                             beforeUpload={(file) => {
-                              if (!/\.(png|jpe?g|gif|webp|bmp|avif|mp4|webm|mov|m4v)$/i.test(file.name)) {
+                              if (
+                                !/\.(png|jpe?g|gif|webp|bmp|avif|mp4|webm|mov|m4v)$/i.test(
+                                  file.name,
+                                )
+                              ) {
                                 setError(t("videoWizard.unsupportedMedia"));
                                 return Upload.LIST_IGNORE;
                               }
@@ -1250,7 +1309,10 @@ export default function ProductVideoWizardPage() {
                             fileList={uploads.map((file) => ({
                               uid: (() => {
                                 let id = uploadFileIds.current.get(file);
-                                if (!id) { id = `wizard-upload-${nextUploadFileId.current++}`; uploadFileIds.current.set(file, id); }
+                                if (!id) {
+                                  id = `wizard-upload-${nextUploadFileId.current++}`;
+                                  uploadFileIds.current.set(file, id);
+                                }
                                 return id;
                               })(),
                               name: file.name,
@@ -1258,7 +1320,11 @@ export default function ProductVideoWizardPage() {
                             }))}
                             onRemove={(file) => {
                               setUploads((list) =>
-                                list.filter((item) => uploadFileIds.current.get(item) !== file.uid),
+                                list.filter(
+                                  (item) =>
+                                    uploadFileIds.current.get(item) !==
+                                    file.uid,
+                                ),
                               );
                               return true;
                             }}
@@ -1270,8 +1336,12 @@ export default function ProductVideoWizardPage() {
                               {t("videoWizard.addAssets")}
                             </Button>
                           </Upload>
-                          {uploadProgress && <Typography.Text>{uploadProgress}</Typography.Text>}
-                          <Typography.Text type="secondary">{t("videoWizard.supportedFormats")}</Typography.Text>
+                          {uploadProgress && (
+                            <Typography.Text>{uploadProgress}</Typography.Text>
+                          )}
+                          <Typography.Text type="secondary">
+                            {t("videoWizard.supportedFormats")}
+                          </Typography.Text>
                           {!!uploads.length && (
                             <Button
                               loading={uploadBusy}
@@ -1523,7 +1593,9 @@ export default function ProductVideoWizardPage() {
                           setNarrationEnabled(e.target.checked);
                           setSaved(false);
                           setDraft((current) =>
-                            current ? { ...current, confirmed: false } : current,
+                            current
+                              ? { ...current, confirmed: false }
+                              : current,
                           );
                         }}
                       >
@@ -1569,7 +1641,9 @@ export default function ProductVideoWizardPage() {
                           }
                           setSaved(false);
                           setDraft((current) =>
-                            current ? { ...current, confirmed: false } : current,
+                            current
+                              ? { ...current, confirmed: false }
+                              : current,
                           );
                         }}
                       >
@@ -1601,8 +1675,7 @@ export default function ProductVideoWizardPage() {
                             }))}
                           />
                           {(() => {
-                            const current =
-                              bgmId || bgmOptions.default || "";
+                            const current = bgmId || bgmOptions.default || "";
                             if (!current) return null;
                             const playing = bgmPreview === current;
                             return (
@@ -1621,11 +1694,7 @@ export default function ProductVideoWizardPage() {
                                     : t("videoWizard.bgmPreview")
                                 }
                                 icon={
-                                  playing ? (
-                                    <X size={14} />
-                                  ) : (
-                                    <Play size={14} />
-                                  )
+                                  playing ? <X size={14} /> : <Play size={14} />
                                 }
                                 onClick={() => toggleBgmPreview(current)}
                               />

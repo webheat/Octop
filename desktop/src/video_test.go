@@ -202,6 +202,18 @@ func TestVideoBridgeJSParses(t *testing.T) {
 	}
 }
 
+func TestVideoBridgeJSExposesMinimalMode(t *testing.T) {
+	withMinimalMode(t, "0")
+	t.Setenv("OCTOP_DESKTOP_MINIMAL", "1")
+	if !strings.Contains(videoBridgeJS("https://example.test/videogen", "nonce"), "minimalMode:true") {
+		t.Fatal("minimal mode must be exposed on the video bridge")
+	}
+	t.Setenv("OCTOP_DESKTOP_MINIMAL", "0")
+	if !strings.Contains(videoBridgeJS("https://example.test/videogen", "nonce"), "minimalMode:false") {
+		t.Fatal("explicit opt-out must be exposed on the video bridge")
+	}
+}
+
 func TestSafeVideoNameAndSameFileCopy(t *testing.T) {
 	if got := safeVideoName(`bad<>:"/\\|?*name... `); got != "badname" {
 		t.Fatalf("safe filename = %q", got)

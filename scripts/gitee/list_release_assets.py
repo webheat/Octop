@@ -3,9 +3,10 @@
     python3 scripts/gitee/list_release_assets.py --repo owner/repo --tag v1.4.0 \
         [--platform windows]
 
-Prints one ``name<TAB>url`` line per asset: the ones that fit the Gitee
-attachment limit and belong to the platform this round delivers. The token
-is read from ``$GH_TOKEN`` / ``$GITHUB_TOKEN``.
+Prints one ``name<TAB>size<TAB>url`` line per asset: the ones that fit the Gitee
+attachment limit and belong to the platform this round delivers. The size is
+included so the caller can tell a complete download from a truncated one. The
+token is read from ``$GH_TOKEN`` / ``$GITHUB_TOKEN``.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def main() -> int:
     assets = release.get("assets") or []
     small, _ = select(assets, args.platform)
     for asset in small:
-        print(f"{asset['name']}\t{asset['browser_download_url']}")
+        print(f"{asset['name']}\t{asset.get('size', 0)}\t{asset['browser_download_url']}")
     return 0
 
 

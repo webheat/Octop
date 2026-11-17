@@ -119,7 +119,9 @@ export default defineConfig(({ mode }) => {
   // (`location /videogen/` + `proxy_pass` without a trailing slash) passes the
   // full "/videogen/api/…" path through to the backend.
   const remoteTarget = (
-    process.env.VITE_API_TARGET ?? env.VITE_API_TARGET ?? apiBaseUrl
+    process.env.VITE_API_TARGET ??
+    env.VITE_API_TARGET ??
+    apiBaseUrl
   )
     .trim()
     .replace(/\/+$/, "");

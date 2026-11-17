@@ -36,6 +36,7 @@ import { useDashboardPushToast } from "../../hooks/useDashboardPushToast";
 import { DesktopVideoJobsProvider } from "../../context/DesktopVideoJobsContext";
 import DesktopVideoGlobalStatus from "../../components/DesktopVideoGlobalStatus";
 import { useRailShortcuts } from "../../hooks/useRailShortcuts";
+import { useDesktopMinimalLanding } from "../../hooks/useDesktopMinimalMode";
 
 const Chat = lazy(() => import("../../pages/Chat"));
 const WorkbenchPage = lazy(() => import("../../pages/Control/Workbench"));
@@ -60,6 +61,7 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const currentPath = location.pathname;
+  const desktopMinimal = useDesktopMinimalLanding(currentPath, navigate);
   const selectedKey = resolveSelectedKey(currentPath);
   const isMobile = useIsMobile();
   const { layoutMode } = useLayoutMode();
@@ -263,47 +265,49 @@ export default function MainLayout() {
               />
             )}
 
-            <div
-              style={{
-                position: "relative",
-                flexShrink: 0,
-                alignSelf: "stretch",
-                display: "flex",
-                minHeight: 0,
-              }}
-            >
-              <Sidebar
-                selectedKey={selectedKey}
-                collapsed={collapsed}
-                onToggle={toggleCollapsed}
-                isMobile={isMobile}
-              />
-              {!isMobile && (
-                <RailEdgeControl
-                  expanded={!collapsed}
-                  onToggle={handleNavRailToggle}
-                  side="end"
-                  placement={
-                    isChatRoute && !isMinimalLayout && !chatSidebarOpen
-                      ? "before"
-                      : "center"
-                  }
-                  label={
-                    collapsed
-                      ? t("layout.expandNav", "展开导航栏")
-                      : t("layout.collapseNav", "收起导航栏")
-                  }
-                  hint={`${
-                    collapsed
-                      ? t("layout.expandNav", "展开导航栏")
-                      : t("layout.collapseNav", "收起导航栏")
-                  } (${railShortcutLabel("toggle-nav", isMacPlatform())})`}
-                  shortcut={railShortcutAria("toggle-nav")}
+            {!desktopMinimal && (
+              <div
+                style={{
+                  position: "relative",
+                  flexShrink: 0,
+                  alignSelf: "stretch",
+                  display: "flex",
+                  minHeight: 0,
+                }}
+              >
+                <Sidebar
+                  selectedKey={selectedKey}
+                  collapsed={collapsed}
+                  onToggle={toggleCollapsed}
+                  isMobile={isMobile}
                 />
-              )}
-            </div>
+                {!isMobile && (
+                  <RailEdgeControl
+                    expanded={!collapsed}
+                    onToggle={handleNavRailToggle}
+                    side="end"
+                    placement={
+                      isChatRoute && !isMinimalLayout && !chatSidebarOpen
+                        ? "before"
+                        : "center"
+                    }
+                    label={
+                      collapsed
+                        ? t("layout.expandNav", "展开导航栏")
+                        : t("layout.collapseNav", "收起导航栏")
+                    }
+                    hint={`${
+                      collapsed
+                        ? t("layout.expandNav", "展开导航栏")
+                        : t("layout.collapseNav", "收起导航栏")
+                    } (${railShortcutLabel("toggle-nav", isMacPlatform())})`}
+                    shortcut={railShortcutAria("toggle-nav")}
+                  />
+                )}
+              </div>
+            )}
 
-            {isChatRoute && !isMinimalLayout && (
+            {!desktopMinimal && isChatRoute && !isMinimalLayout && (
               <div
                 id={CHAT_HISTORY_RAIL_ID}
                 style={{

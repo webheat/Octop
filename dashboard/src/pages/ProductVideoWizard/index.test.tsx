@@ -178,12 +178,17 @@ const savedDraft = {
   confirmed: false,
 };
 
-function renderWizard(
-  path = "/product-library/video-wizard",
-  state?: unknown,
-) {
+function renderWizard(path = "/product-library/video-wizard", state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: path.split("?")[0], search: path.includes("?") ? `?${path.split("?")[1]}` : "", state }]}>
+    <MemoryRouter
+      initialEntries={[
+        {
+          pathname: path.split("?")[0],
+          search: path.includes("?") ? `?${path.split("?")[1]}` : "",
+          state,
+        },
+      ]}
+    >
       <Routes>
         <Route
           path="/product-library/video-wizard"
@@ -376,13 +381,28 @@ describe("product video wizard", () => {
   });
 
   it("uses only available assets from the same product in route selection, including an explicit empty selection", async () => {
-    api.assets.mockResolvedValue({ items: [sceneAsset, foreignAsset, { ...sceneAsset, id: "disabled", active: 0 }, { ...sceneAsset, id: "reference", usage: "reference" }] });
-    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset1", "asset2", "disabled", "reference"], ownerId: 7 });
+    api.assets.mockResolvedValue({
+      items: [
+        sceneAsset,
+        foreignAsset,
+        { ...sceneAsset, id: "disabled", active: 0 },
+        { ...sceneAsset, id: "reference", usage: "reference" },
+      ],
+    });
+    renderWizard("/product-library/video-wizard?product=p1", {
+      productId: "p1",
+      assetIds: ["asset1", "asset2", "disabled", "reference"],
+      ownerId: 7,
+    });
     await screen.findByText("front.jpg");
     expect(screen.getAllByRole("checkbox")[0]).toBeChecked();
     expect(screen.queryByText("foreign.jpg")).not.toBeInTheDocument();
     cleanup();
-    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: [], ownerId: 7 });
+    renderWizard("/product-library/video-wizard?product=p1", {
+      productId: "p1",
+      assetIds: [],
+      ownerId: 7,
+    });
     await screen.findByText("front.jpg");
     expect(screen.getAllByRole("checkbox")[0]).not.toBeChecked();
   });
@@ -390,7 +410,11 @@ describe("product video wizard", () => {
   it("does not inherit another owner's route selection and gives an existing project precedence", async () => {
     const secondAsset = { ...sceneAsset, id: "asset2", filename: "side.jpg" };
     api.assets.mockResolvedValue({ items: [sceneAsset, secondAsset] });
-    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset2"], ownerId: 6 });
+    renderWizard("/product-library/video-wizard?product=p1", {
+      productId: "p1",
+      assetIds: ["asset2"],
+      ownerId: 6,
+    });
     await screen.findByText("side.jpg");
     expect(screen.getAllByRole("checkbox")[0]).toBeChecked();
     expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
@@ -398,27 +422,43 @@ describe("product video wizard", () => {
     cleanup();
     api.projects.mockResolvedValue({ items: [project] });
     api.getStoryboard.mockResolvedValue(savedDraft);
-    renderWizard("/product-library/video-wizard?project=project1&product=p1", { productId: "p1", assetIds: [], ownerId: 7 });
-    await waitFor(() => expect(api.getStoryboard).toHaveBeenCalledWith("project1"));
+    renderWizard("/product-library/video-wizard?project=project1&product=p1", {
+      productId: "p1",
+      assetIds: [],
+      ownerId: 7,
+    });
+    await waitFor(() =>
+      expect(api.getStoryboard).toHaveBeenCalledWith("project1"),
+    );
   });
 
   it("ignores a late asset response after switching products", async () => {
     const user = userEvent.setup();
     const secondProduct = { ...product, id: "p2", name: "Second product" };
-    let resolveFirst!: (value: { items: typeof sceneAsset[] }) => void;
-    let resolveSecond!: (value: { items: typeof sceneAsset[] }) => void;
+    let resolveFirst!: (value: { items: (typeof sceneAsset)[] }) => void;
+    let resolveSecond!: (value: { items: (typeof sceneAsset)[] }) => void;
     api.products.mockResolvedValue({ items: [product, secondProduct] });
-    api.assets.mockImplementation((id: string) => new Promise((resolve) => {
-      if (id === "p1") resolveFirst = resolve;
-      else resolveSecond = resolve;
-    }));
+    api.assets.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) => {
+          if (id === "p1") resolveFirst = resolve;
+          else resolveSecond = resolve;
+        }),
+    );
     renderWizard();
     await screen.findByText("videoWizard.chooseTitle");
-    const selector = screen.getByRole("combobox", { name: "videoWizard.product" });
+    const selector = screen.getByRole("combobox", {
+      name: "videoWizard.product",
+    });
     await user.selectOptions(selector, "p1");
     await user.selectOptions(selector, "p2");
     await act(async () => resolveFirst({ items: [sceneAsset] }));
-    const secondAsset = { ...sceneAsset, id: "p2-asset", product_id: "p2", filename: "second.jpg" };
+    const secondAsset = {
+      ...sceneAsset,
+      id: "p2-asset",
+      product_id: "p2",
+      filename: "second.jpg",
+    };
     await act(async () => resolveSecond({ items: [secondAsset] }));
     await screen.findByText("second.jpg");
     expect(screen.queryByText("front.jpg")).not.toBeInTheDocument();
@@ -429,23 +469,43 @@ describe("product video wizard", () => {
     const added = { ...sceneAsset, id: "asset-new", filename: "new.jpg" };
     const failedFile = new File(["bad"], "failed.jpg", { type: "image/jpeg" });
     const goodFile = new File(["good"], "new.jpg", { type: "image/jpeg" });
-    api.upload.mockRejectedValueOnce(new Error("temporary failure"))
+    api.upload
+      .mockRejectedValueOnce(new Error("temporary failure"))
       .mockResolvedValueOnce({ items: [added] })
-      .mockResolvedValueOnce({ items: [{ ...sceneAsset, id: "asset-retry", filename: "failed.jpg" }] });
-    api.assets.mockResolvedValueOnce({ items: [sceneAsset] })
+      .mockResolvedValueOnce({
+        items: [{ ...sceneAsset, id: "asset-retry", filename: "failed.jpg" }],
+      });
+    api.assets
+      .mockResolvedValueOnce({ items: [sceneAsset] })
       .mockResolvedValueOnce({ items: [sceneAsset, added] })
-      .mockResolvedValue({ items: [sceneAsset, added, { ...sceneAsset, id: "asset-retry", filename: "failed.jpg" }] });
-    renderWizard("/product-library/video-wizard?product=p1", { productId: "p1", assetIds: ["asset1"], ownerId: 7 });
+      .mockResolvedValue({
+        items: [
+          sceneAsset,
+          added,
+          { ...sceneAsset, id: "asset-retry", filename: "failed.jpg" },
+        ],
+      });
+    renderWizard("/product-library/video-wizard?product=p1", {
+      productId: "p1",
+      assetIds: ["asset1"],
+      ownerId: 7,
+    });
     await screen.findByText("front.jpg");
     await user.click(screen.getByText("front.jpg").closest("button")!);
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
     await user.upload(input, [failedFile, goodFile]);
-    await user.click(screen.getByRole("button", { name: "videoWizard.uploadAssets" }));
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.uploadAssets" }),
+    );
     await screen.findByText("new.jpg");
     expect(screen.getAllByRole("checkbox")[0]).not.toBeChecked();
     expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
     expect(screen.getByText("failed.jpg")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "videoWizard.uploadAssets" }));
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.uploadAssets" }),
+    );
     await waitFor(() => expect(api.upload).toHaveBeenCalledTimes(3));
     expect(screen.getByText("failed.jpg")).toBeInTheDocument();
   });
@@ -642,7 +702,9 @@ describe("product video wizard", () => {
     );
     // A paid account may pick one of the server-side voices.
     await user.selectOptions(
-      await screen.findByRole("combobox", { name: "videoWizard.narrationVoice" }),
+      await screen.findByRole("combobox", {
+        name: "videoWizard.narrationVoice",
+      }),
       "female-shaonv",
     );
     // Regenerating the picture keeps the audio settings.

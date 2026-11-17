@@ -32,6 +32,12 @@ from octop.infra.product_library.service import (
 )
 from octop.infra.product_library.video_drafts import delete_draft, load_draft, save_draft
 from octop.infra.product_library.video_planner import VideoPlanRequest, build_video_plan
+from octop.infra.product_library.vision import (
+    describe_asset as describe_asset_content,
+)
+from octop.infra.product_library.vision import (
+    describe_missing_assets,
+)
 from octop.infra.voice.manager import VoiceManager
 
 router = APIRouter()
@@ -102,6 +108,13 @@ class AssetResponse(BaseModel):
     priority: int
     active: int
     created_at: int
+    ai_description: str = ""
+    ai_tags: list[str] = []
+    ai_status: str = "none"
+    ai_error: str = ""
+    ai_model: str = ""
+    ai_content_hash: str = ""
+    ai_updated_at: int = 0
 
 
 class ProjectResponse(BaseModel):
@@ -122,6 +135,13 @@ class AssetItemsResponse(BaseModel):
 
 class ProjectItemsResponse(BaseModel):
     items: list[ProjectResponse]
+
+
+class DescribeMissingResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    items: list[AssetResponse]
 
 
 class PreparedResponse(BaseModel):
@@ -333,6 +353,38 @@ async def update_asset(
 ) -> dict[str, Any]:
     return _service(server).update_asset(
         user.id, asset_id, usage=body.usage, priority=body.priority, active=body.active
+    )
+
+
+@router.post(
+    "/product-library/assets/{asset_id}/describe",
+    response_model=AssetResponse,
+    summary="Generate an LLM content description for one image asset",
+)
+async def generate_asset_description(
+    asset_id: str, user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> dict[str, Any]:
+    return await describe_asset_content(
+        _service(server),
+        server.services.provider_repo,
+        owner_id=user.id,
+        asset_id=asset_id,
+    )
+
+
+@router.post(
+    "/product-library/products/{product_id}/describe-missing",
+    response_model=DescribeMissingResponse,
+    summary="Generate LLM content descriptions for all undescribed product images",
+)
+async def generate_missing_descriptions(
+    product_id: str, user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> dict[str, Any]:
+    return await describe_missing_assets(
+        _service(server),
+        server.services.provider_repo,
+        owner_id=user.id,
+        product_id=product_id,
     )
 
 

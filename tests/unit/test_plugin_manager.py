@@ -494,6 +494,6 @@ def test_channel_reload_preserves_class_until_source_changes(tmp_path: Path) -> 
     first = manager.load_installed(install_deps=False)[0].channels[0].channel_cls
     second = manager.load_installed(install_deps=False)[0].channels[0].channel_cls
     assert first is second
-    source.write_text(source.read_text() + "\n# updated implementation\n")
+    source.write_text(source.read_text(encoding="utf-8") + "\n# updated implementation\n")
     third = manager.load_installed(install_deps=False)[0].channels[0].channel_cls
     assert third is not first

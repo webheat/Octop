@@ -171,6 +171,23 @@ export function userCan(
   return (user.permissions ?? []).includes(key);
 }
 
+/** Backend paid-tier marker, shared with the bundled narration presets. */
+export const PAID_TIER_PERMISSION = "voice_tts_premium";
+
+/**
+ * Paid features need an explicitly held entitlement. The admin bypass in
+ * `userCan` must not unlock a paid tier by itself.
+ */
+export function isPaidTierUser(
+  user: PermissionHolder | null | undefined,
+): boolean {
+  if (!user) return false;
+  return (
+    user.role === "premium" ||
+    (user.permissions ?? []).includes(PAID_TIER_PERMISSION)
+  );
+}
+
 /** True when the user holds any of the given keys (admin bypasses). */
 export function userCanAny(
   user: PermissionHolder | null | undefined,

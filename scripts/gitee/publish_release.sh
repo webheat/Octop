@@ -78,7 +78,15 @@ if [[ -n "$body_file" ]]; then
     exit 1
   fi
   body="$(cat "$body_file")"
+  # The notes are published verbatim, so normalise CRLF — a notes file written
+  # on Windows would otherwise reach the release page with Windows line ends.
+  body="${body//$'\r'/}"
 fi
+
+# Scratch file for the response body of an attachment upload — Gitee's error
+# message is the only clue when an upload is rejected.
+attach_body="$(mktemp)"
+trap 'rm -f "$attach_body"' EXIT
 
 api() {
   # api <method> <path> [curl args...]
@@ -113,28 +121,98 @@ body_of() {
   sed '$d'
 }
 
+require_json() {
+  # A broken body must say so. Parsing it inside a command substitution would
+  # abort the script through `set -e` without naming the API that failed.
+  local body="$1" what="$2"
+  if [[ -z "${body//[[:space:]]/}" ]]; then
+    echo "::error::the Gitee API returned an empty body for ${what}" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$body" | python3 -c 'import json,sys; json.loads(sys.stdin.read() or "null")' 2>/dev/null; then
+    echo "::error::the Gitee API returned a non-JSON body for ${what}: ${body:0:200}" >&2
+    exit 1
+  fi
+}
+
 # --- 1. find the release (Gitee answers 200 with a null body when the tag
 #        exists but has no release yet) -------------------------------------
 release_id=""
 existing_assets=""
 response="$(api GET "/repos/${owner}/${repo}/releases/tags/${tag}")"
-if [[ "$(printf '%s' "$response" | status_of)" == "200" ]]; then
-  release_id="$(printf '%s' "$response" | body_of | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("id",""))')"
-  existing_assets="$(printf '%s' "$response" | body_of | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print("\n".join(a["name"] for a in d.get("assets",[])))')"
-fi
+status="$(printf '%s' "$response" | status_of)"
+case "$status" in
+  200)
+    release_body="$(printf '%s' "$response" | body_of)"
+    require_json "$release_body" "the release of ${tag}"
+    release_id="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("id",""))')"
+    existing_target="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print(d.get("target_commitish",""))')"
+    existing_assets="$(printf '%s' "$release_body" | python3 -c 'import json,sys; d=json.load(sys.stdin) or {}; print("\n".join(a.get("name","") for a in (d.get("assets") or [])))')"
+    ;;
+  404)
+    # No release for this tag yet — create one below.
+    ;;
+  401|403)
+    # Not "it does not exist": the token is wrong. Say so, or the real cause
+    # surfaces later as a confusing "could not create the release".
+    echo "::error::Gitee rejected the token (HTTP ${status})" >&2
+    echo "  The token needs the 'projects' permission on ${owner}/${repo}." >&2
+    exit 1
+    ;;
+  *)
+    echo "::error::cannot read the Gitee release for ${tag} (HTTP ${status})" >&2
+    printf '%s\n' "$response" | body_of >&2
+    exit 1
+    ;;
+esac
 
 if [[ -n "$release_id" ]]; then
   echo "Reusing the existing Gitee release ${release_id} for ${tag}"
+  # The body carries the download links and the asset list. A re-publish with
+  # fresh notes must update it, or the release page keeps advertising the
+  # previous round's files.
+  if [[ -n "$body" ]]; then
+    patch="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$body")"
+    response="$(api_json PATCH "/repos/${owner}/${repo}/releases/${release_id}" "$patch")"
+    status="$(printf '%s' "$response" | status_of)"
+    if [[ "$status" != "200" && "$status" != "201" ]]; then
+      echo "::error::could not update the release notes (HTTP ${status})" >&2
+      printf '%s\n' "$response" | body_of >&2
+      exit 1
+    fi
+    echo "Updated the release notes"
+  fi
+  # Gitee cannot move an existing tag. If the download page moved on (a new
+  # commit), the tag still points at the old one and the release page shows
+  # the previous download page — say so instead of pretending it worked.
+  if [[ -n "$base_sha" && -n "$existing_target" && "$base_sha" != "$existing_target" ]]; then
+    echo "::warning::the tag ${tag} still points at ${existing_target}, not at the new download page (${base_sha})." >&2
+    echo "  Gitee cannot move an existing tag — publish this round under a new tag" >&2
+    echo "  (e.g. ${tag%.*}-gitee.$((${tag##*.} + 1)))." >&2
+  fi
 else
   # The tag may already exist (pushed over SSH). Creating a release then
   # creates the tag as well, so only pass a target when the tag is missing.
+  #
+  # The tag list is paginated — a repository with many tags would otherwise
+  # hide the one we care about on the first page.
   tag_exists="no"
-  response="$(api GET "/repos/${owner}/${repo}/tags")"
-  if [[ "$(printf '%s' "$response" | status_of)" == "200" ]]; then
-    if printf '%s' "$response" | body_of | python3 -c 'import json,sys; sys.exit(0 if any(t.get("name")==sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)' "$tag"; then
-      tag_exists="yes"
+  page=1
+  while [[ "$page" -le 100 ]]; do
+    response="$(api GET "/repos/${owner}/${repo}/tags?per_page=100&page=${page}")"
+    if [[ "$(printf '%s' "$response" | status_of)" != "200" ]]; then
+      break
     fi
-  fi
+    tags_body="$(printf '%s' "$response" | body_of)"
+    require_json "$tags_body" "the tag list"
+    if printf '%s' "$tags_body" | python3 -c 'import json,sys; sys.exit(0 if any(t.get("name")==sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)' "$tag"; then
+      tag_exists="yes"
+      break
+    fi
+    count="$(printf '%s' "$tags_body" | python3 -c 'import json,sys; print(len(json.load(sys.stdin) or []))')"
+    [[ "$count" -eq 0 ]] && break
+    page=$((page + 1))
+  done
 
   target="$base_sha"
   if [[ -z "$target" && "$tag_exists" != "yes" ]]; then
@@ -170,7 +248,9 @@ for path in "$assets_dir"/*; do
   [[ -f "$path" ]] || continue
   name="$(basename "$path")"
   size="$(wc -c < "$path" | tr -d ' ')"
-  if [[ "$size" -gt "$max_bytes" ]]; then
+  # The limit is "smaller than the cap", same as assets.py: an attachment of
+  # exactly 100 MB does not fit either.
+  if [[ "$size" -ge "$max_bytes" ]]; then
     skipped+=("${name} ($((size / 1024 / 1024)) MB)")
     continue
   fi
@@ -179,12 +259,21 @@ for path in "$assets_dir"/*; do
     continue
   fi
   echo "Uploading ${name} ($((size / 1024 / 1024)) MB)"
-  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  # Keep curl's exit code separate from the HTTP status: a transport failure
+  # must not abort through `set -e` before the reason is printed.
+  rc=0
+  code="$(curl -sS -o "$attach_body" -w '%{http_code}' -X POST \
     -H "Authorization: token ${token}" \
     -F "file=@${path}" \
-    "${API_BASE}/repos/${owner}/${repo}/releases/${release_id}/attach_files")"
+    "${API_BASE}/repos/${owner}/${repo}/releases/${release_id}/attach_files")" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "::error::uploading ${name} failed at the transport level (curl exit ${rc})" >&2
+    exit 1
+  fi
   if [[ "$code" != "201" && "$code" != "200" ]]; then
     echo "::error::attach failed for ${name} (HTTP ${code})" >&2
+    head -c 400 "$attach_body" >&2
+    echo >&2
     exit 1
   fi
   uploaded+=("$name")
