@@ -73,7 +73,7 @@ export const pathToKey: Record<string, string> = {
   "/skill-packages": "skill-packages",
   "/knowledge-bases": "knowledge-bases",
   "/product-library": "product-library",
-  "/product-library/video-wizard": "product-library",
+  "/product-library/video-wizard": "video-wizard",
   "/video-environment": "video-environment",
   "/video-analysis": "video-analysis",
   "/bridge": "bridge",

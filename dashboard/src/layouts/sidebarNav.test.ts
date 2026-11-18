@@ -50,11 +50,17 @@ describe("sidebarNav", () => {
     const keys = buildNavSections(adminUser, { mobileEnabled: true }).flatMap(
       (section) => section.items.map((item) => item.key),
     );
-    expect(new Set(keys)).toEqual(new Set(SIDEBAR_NAV_KEYS));
+    // 专家 / 自动化 / Token 统计 已按产品要求从导航中移除，但仍保留在
+    // SIDEBAR_NAV_KEYS 目录里以兼容已保存的旧用户布局（见 sidebarNav.tsx）。
+    const notRendered = ["experts", "tasks", "token-usage"];
+    expect(new Set(keys)).toEqual(
+      new Set(SIDEBAR_NAV_KEYS.filter((key) => !notRendered.includes(key))),
+    );
     const grouped = buildNavSections(adminUser, { mobileEnabled: true }).filter(
       (section) => section.id,
     );
     expect(grouped.map((section) => section.id)).toEqual([
+      "video",
       "settings",
       "control",
       "admin",

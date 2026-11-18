@@ -35,6 +35,7 @@ export type SidebarNavItemZone =
   | { kind: "group"; groupId: string };
 
 const BUILTIN_ID_BY_LABEL: Record<string, string> = {
+  "nav.video": "video",
   "nav.settings": "settings",
   "nav.control": "control",
   "nav.admin": "admin",

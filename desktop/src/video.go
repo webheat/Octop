@@ -109,6 +109,7 @@ type videoManager struct {
 	environmentCmd     *exec.Cmd
 	environmentStdin   io.WriteCloser
 	environmentLogKey  string
+	installRunning     bool
 	listener           net.Listener
 	server             *http.Server
 }
@@ -547,19 +548,22 @@ func videoRuntimeDir() (string, error) {
 			return p, nil
 		}
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	// The portable layout and the self-service installer both land here, so
+	// prefer it over the legacy per-user NSIS location: a freshly installed
+	// runtime must win over an older copy left by the retired installer.
+	candidate := filepath.Join(filepath.Dir(exe), "video-runtime")
+	if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+		return candidate, nil
+	}
 	if cache, err := os.UserCacheDir(); err == nil {
 		candidate := filepath.Join(cache, "Octop", "video-runtime")
 		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
 			return candidate, nil
 		}
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	candidate := filepath.Join(filepath.Dir(exe), "video-runtime")
-	if st, err := os.Stat(candidate); err == nil && st.IsDir() {
-		return candidate, nil
 	}
 	return "", videoErr("RUNTIME_MISSING")
 }
@@ -985,7 +989,7 @@ func (a *App) videoAction(action string, payload map[string]json.RawMessage) (an
 		return nil, videoErr("AUTH_REQUIRED")
 	}
 	switch action {
-	case "environment_check", "environment_verify", "environment_status":
+	case "environment_check", "environment_verify", "environment_status", "environment_install":
 		return a.video.environmentAction(token, action)
 	case "start":
 		return a.video.start(token, project)

@@ -218,11 +218,6 @@ export default function ProductVideoWizardPage() {
   // account capabilities are still unknown the free tier is assumed, so the
   // toggle stays usable instead of flickering.
   const narrationAvailable = isDesktop;
-  const environmentInstallerURL =
-    desktopVideo.environmentInstallerURL &&
-    /^https?:\/\//i.test(desktopVideo.environmentInstallerURL)
-      ? desktopVideo.environmentInstallerURL
-      : undefined;
   const urlsRef = useRef<Record<string, string>>({});
   const uploadFileIds = useRef(new WeakMap<File, string>());
   const nextUploadFileId = useRef(0);
@@ -930,6 +925,17 @@ export default function ProductVideoWizardPage() {
     }
   };
 
+  const installEnvironment = async () => {
+    setEnvironmentBusy(true);
+    try {
+      await desktopVideo.installEnvironment();
+    } catch {
+      // The provider retains the localized error code in its status snapshot.
+    } finally {
+      setEnvironmentBusy(false);
+    }
+  };
+
   const download = async () => {
     if (!project || !draft?.confirmed || !saved) return;
     const version = requestVersion.current;
@@ -1047,6 +1053,7 @@ export default function ProductVideoWizardPage() {
           </Button>
         </>
       ) : environmentStatus.state === "checking" ||
+        environmentStatus.state === "installing" ||
         environmentStatus.state === "verifying" ||
         environmentStatus.state === "unknown" ? (
         <>
@@ -1057,7 +1064,9 @@ export default function ProductVideoWizardPage() {
                 {t(
                   environmentStatus.state === "verifying"
                     ? "videoWizard.environment.verifying"
-                    : "videoWizard.environment.checking",
+                    : environmentStatus.state === "installing"
+                      ? "videoWizard.environment.installing"
+                      : "videoWizard.environment.checking",
                 )}
               </strong>
               {environmentStatus.stage && (
@@ -1091,26 +1100,19 @@ export default function ProductVideoWizardPage() {
           />
           <ol className={styles.environmentSteps}>
             <li>{t("videoWizard.environment.installStepDownload")}</li>
-            <li>{t("videoWizard.environment.installStepRun")}</li>
+            <li>{t("videoWizard.environment.installStepInstall")}</li>
             <li>{t("videoWizard.environment.installStepRecheck")}</li>
           </ol>
           <Space wrap>
-            {environmentInstallerURL ? (
-              <Button
-                type="primary"
-                href={environmentInstallerURL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t("videoWizard.environment.downloadComponents")}
-              </Button>
-            ) : (
-              <Typography.Text type="secondary">
-                {t("videoWizard.environment.contactAdmin")}
-              </Typography.Text>
-            )}
             <Button
-              type={environmentInstallerURL ? "default" : "primary"}
+              type="primary"
+              loading={environmentBusy}
+              disabled={environmentBusy}
+              onClick={() => void installEnvironment()}
+            >
+              {t("videoWizard.environment.downloadComponents")}
+            </Button>
+            <Button
               loading={environmentBusy}
               disabled={environmentBusy}
               onClick={() => void recheckEnvironment()}

@@ -28,8 +28,11 @@ const trayDoubleClick = 400 * time.Millisecond
 // environment variable nor a bundled local runtime. Empty means local mode.
 var defaultServerURL string
 
-// defaultVideoComponentsURL is an optional installer URL exposed to the UI.
-// The native shell never downloads or executes that installer.
+// defaultVideoComponentsURL is the URL of the video components manifest,
+// baked in via -ldflags "-X main.defaultVideoComponentsURL=https://.../manifest.json".
+// The native shell downloads its parts on demand (environment_install); it
+// never executes an installer and never touches system PATH. Empty means the
+// UI falls back to the "contact administrator" guidance.
 var defaultVideoComponentsURL string
 
 // portableRuntimeURL is baked in at build time via

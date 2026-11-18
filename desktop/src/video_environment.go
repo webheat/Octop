@@ -37,7 +37,7 @@ func environmentStage(stage string) *string { return &stage }
 
 func environmentErrorCode(code string) string {
 	switch code {
-	case "RUNTIME_MISSING", "BROWSER_MISSING", "ENV_DISK_FULL", "ENV_BROWSER_FAILED", "ENV_RENDER_FAILED", "ENV_CHECK_FAILED", "AUTH_REQUIRED", "BUSY", "INTERNAL":
+	case "RUNTIME_MISSING", "BROWSER_MISSING", "ENV_DISK_FULL", "ENV_BROWSER_FAILED", "ENV_RENDER_FAILED", "ENV_CHECK_FAILED", "DOWNLOAD_FAILED", "PACKAGE_INVALID", "NO_INSTALLER", "AUTH_REQUIRED", "BUSY", "INTERNAL":
 		return code
 	default:
 		return "ENV_CHECK_FAILED"
@@ -66,6 +66,9 @@ func (m *videoManager) environmentAction(token, action string) (VideoEnvironment
 	}
 	if action == "environment_status" {
 		return m.environmentSnapshot(), nil
+	}
+	if action == "environment_install" {
+		return m.startEnvironmentInstall(token)
 	}
 	if action != "environment_check" && action != "environment_verify" {
 		return VideoEnvironmentStatus{}, videoErr("INTERNAL")
@@ -254,7 +257,7 @@ func (m *videoManager) runEnvironment(mode, runtimeDir, cache string) {
 func sanitizeEnvironmentMessage(msg environmentMessage) (VideoEnvironmentStatus, bool) {
 	status := VideoEnvironmentStatus{State: msg.State, Stage: msg.Stage, Progress: msg.Progress, RequiresInstall: msg.RequiresInstall}
 	switch status.State {
-	case "unknown", "checking", "needs_setup", "verifying", "ready", "failed":
+	case "unknown", "checking", "installing", "needs_setup", "verifying", "ready", "failed":
 	default:
 		return VideoEnvironmentStatus{}, false
 	}

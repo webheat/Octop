@@ -56,6 +56,7 @@ const desktopJobs = vi.hoisted(() => ({
   save: vi.fn(),
   checkEnvironment: vi.fn(),
   verifyEnvironment: vi.fn(),
+  installEnvironment: vi.fn(),
   refreshEnvironment: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -606,7 +607,9 @@ describe("product video wizard", () => {
       screen.getByText("videoWizard.environment.installTitle"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("videoWizard.environment.contactAdmin"),
+      screen.getByRole("button", {
+        name: "videoWizard.environment.downloadComponents",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "videoWizard.confirmMake" }),
@@ -615,28 +618,30 @@ describe("product video wizard", () => {
     expect(api.saveStoryboard).not.toHaveBeenCalled();
   });
 
-  it("uses a configured installer URL without opening or running it", async () => {
+  it("installs components through the desktop bridge instead of an external link", async () => {
+    const user = userEvent.setup();
     api.projects.mockResolvedValue({ items: [project] });
     api.getStoryboard.mockResolvedValue(savedDraft);
     desktopJobs.bridgeAvailable = true;
     desktopJobs.environmentSupported = true;
+    desktopJobs.installEnvironment.mockResolvedValue({
+      state: "installing",
+      stage: "components",
+      progress: 0,
+    });
     desktopJobs.environmentStatus = {
       state: "needs_setup",
       stage: "components",
       progress: null,
       requiresInstall: true,
     };
-    desktopJobs.environmentInstallerURL =
-      "https://downloads.example.invalid/video-components.exe";
     renderWizard("/product-library/video-wizard?project=project1");
-    const installer = await screen.findByRole("link", {
+    const installButton = await screen.findByRole("button", {
       name: "videoWizard.environment.downloadComponents",
     });
-    expect(installer).toHaveAttribute(
-      "href",
-      "https://downloads.example.invalid/video-components.exe",
-    );
-    expect(installer).toHaveAttribute("target", "_blank");
+    expect(installButton).not.toHaveAttribute("href");
+    await user.click(installButton);
+    expect(desktopJobs.installEnvironment).toHaveBeenCalled();
     expect(desktopJobs.start).not.toHaveBeenCalled();
   });
 
