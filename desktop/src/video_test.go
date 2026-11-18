@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,7 +34,14 @@ func init() {
 			time.Sleep(200 * time.Millisecond)
 		} else {
 			_, _ = fmt.Fprintln(os.Stdout, `{"type":"environment","state":"checking","stage":"components","progress":0.5}`)
-			_, _ = fmt.Fprintln(os.Stdout, `{"type":"environment","state":"needs_setup","stage":"render_test","errorCode":"BROWSER_MISSING"}`)
+			// Two real outcomes the native side has to tell apart:
+			// a missing browser (install again) and components that are in
+			// place but never verified (verify, do not download again).
+			if os.Getenv("OCTOP_TEST_VIDEO_ENV_WORKER_MISSING_BROWSER") == "1" {
+				_, _ = fmt.Fprintln(os.Stdout, `{"type":"environment","state":"needs_setup","stage":"browser","errorCode":"BROWSER_MISSING","requiresInstall":true}`)
+			} else {
+				_, _ = fmt.Fprintln(os.Stdout, `{"type":"environment","state":"needs_setup","stage":"components","errorCode":"ENV_NOT_VERIFIED"}`)
+			}
 		}
 		os.Exit(0)
 	}
@@ -265,6 +273,9 @@ func TestVideoEnvironmentCheckAndVerifyUseTrustedWorker(t *testing.T) {
 	}
 	t.Setenv("OCTOP_DESKTOP_VIDEO_RUNTIME", runtimeDir)
 	t.Setenv("OCTOP_TEST_VIDEO_ENV_WORKER", "1")
+	// This case is about a *missing* browser: the components have to be
+	// installed again.
+	t.Setenv("OCTOP_TEST_VIDEO_ENV_WORKER_MISSING_BROWSER", "1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/auth/me" {
 			http.NotFound(w, r)
@@ -374,6 +385,117 @@ func TestVideoStartRequiresVerifiedEnvironment(t *testing.T) {
 	m := newVideoManager(server.URL)
 	if _, err := m.start("secret", "project_123"); err == nil || err.Error() != "RUNTIME_MISSING" {
 		t.Fatalf("start with unknown environment: %v", err)
+	}
+}
+
+// TestVideoEnvironmentInstalledButNotVerifiedDoesNotAskForInstall locks the
+// behaviour that made users reinstall forever: with the components in place
+// but no successful render recorded yet, the status must be "verify me", not
+// "install me". Only a missing component may set RequiresInstall.
+func TestVideoEnvironmentInstalledButNotVerifiedDoesNotAskForInstall(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OCTOP_HOME", root)
+	runtimeDir := filepath.Join(root, "components")
+	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "runtime.json"), []byte(`{"schema":"octop-desktop-video-runtime/1","templateVersion":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "desktop-worker.mjs"), []byte("// trusted fixture worker"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	node := "node"
+	if runtime.GOOS == "windows" {
+		node = "node.exe"
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(runtimeDir, node), binary, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OCTOP_DESKTOP_VIDEO_RUNTIME", runtimeDir)
+	t.Setenv("OCTOP_TEST_VIDEO_ENV_WORKER", "1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/me" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":42}`)
+	}))
+	defer server.Close()
+	m := newVideoManager(server.URL)
+	if _, err := m.environmentAction("secret", "environment_check"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var status VideoEnvironmentStatus
+	for time.Now().Before(deadline) {
+		status, err = m.environmentAction("secret", "environment_status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.State == "needs_setup" || status.State == "failed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if status.State != "needs_setup" {
+		t.Fatalf("expected needs_setup, got %+v", status)
+	}
+	if status.RequiresInstall {
+		t.Fatalf("installed components must not ask for an install: %+v", status)
+	}
+	if status.ErrorCode != "ENV_NOT_VERIFIED" {
+		t.Fatalf("expected ENV_NOT_VERIFIED, got %+v", status)
+	}
+}
+
+// TestVideoEnvironmentErrorCodeKeepsNotVerified makes sure the new code
+// survives the sanitizer; an unknown code would silently become
+// ENV_CHECK_FAILED and the UI would show the wrong guidance.
+func TestVideoEnvironmentErrorCodeKeepsNotVerified(t *testing.T) {
+	if got := environmentErrorCode("ENV_NOT_VERIFIED"); got != "ENV_NOT_VERIFIED" {
+		t.Fatalf("environmentErrorCode(ENV_NOT_VERIFIED)=%q", got)
+	}
+}
+
+// TestVideoEnvironmentWritesDiagnosticLog proves a support report can be
+// built from the log file: the runtime directory, the chosen state and the
+// worker output all have to show up there.
+//
+// The logger is a private instance on purpose. The global navLog is guarded
+// by a sync.Once and owns an HTTP listener; starting it here would consume
+// that once for the whole test binary and leave the SAPI narration tests
+// flaky, because the spawned listener perturbs the COM thread the speech
+// engine runs on.
+func TestVideoEnvironmentWritesDiagnosticLog(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "logs", navLogFileName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	logger := &navLogger{logger: log.New(file, "", log.LstdFlags|log.Lmicroseconds), file: file}
+
+	logger.logf("video env: probe line for the log test")
+	time.Sleep(50 * time.Millisecond)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "probe line for the log test") {
+		t.Fatalf("log file does not contain the probe line: %s", data)
 	}
 }
 

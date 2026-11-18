@@ -42,7 +42,10 @@ const POLL_TIMEOUT_MS = 12_000;
 export function hasDesktopUrlFlag(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return new URLSearchParams(window.location.search).get(DESKTOP_QUERY_FLAG) === "1";
+    return (
+      new URLSearchParams(window.location.search).get(DESKTOP_QUERY_FLAG) ===
+      "1"
+    );
   } catch {
     return false;
   }

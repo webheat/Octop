@@ -52,7 +52,10 @@ test("check with no host browser reports BROWSER_MISSING without launching a bro
   const result = spawnSync(process.execPath, [WORKER, "--check", "--cache", path.join(root, "cache")], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, OCTOP_DESKTOP_VIDEO_RUNTIME: root, LOCALAPPDATA: emptyProfile, ProgramFiles: emptyProfile, "ProgramFiles(x86)": emptyProfile, REMOTION_BROWSER_EXECUTABLE: path.join(emptyProfile, "missing.exe") },
+    // Windows restores the real ProgramFiles value inside child processes,
+    // so pointing it at an empty directory is not enough to describe a
+    // machine without a browser. The explicit switch is.
+    env: { ...process.env, OCTOP_DESKTOP_VIDEO_RUNTIME: root, LOCALAPPDATA: emptyProfile, ProgramFiles: emptyProfile, "ProgramFiles(x86)": emptyProfile, REMOTION_BROWSER_EXECUTABLE: path.join(emptyProfile, "missing.exe"), OCTOP_VIDEO_NO_SYSTEM_BROWSER: "1" },
   });
   assert.equal(result.status, 0, result.stderr);
   const events = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));

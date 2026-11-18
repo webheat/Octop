@@ -406,7 +406,11 @@
     "installingHint": "首次下载约需几分钟，请保持客户端打开。组件安装在客户端所在目录，不会修改系统 PATH。",
     "installFailedTitle": "组件安装失败",
     "installFailedHint": "请检查网络与磁盘空间后重试，或联系管理员。",
-    "retryInstall": "重试安装"
+    "retryInstall": "重试安装",
+    "copyDiagnostics": "复制诊断信息",
+    "diagnosticsTitle": "Octop 视频生成环境诊断信息",
+    "diagnosticsCopied": "诊断信息已复制，可直接粘贴给技术支持",
+    "diagnosticsCopyFailed": "复制失败，请手动记录页面上的状态"
   },
   "videoAnalysis": {
     "title": "分析目标视频",
@@ -742,7 +746,8 @@
       "SAVE_FAILED": "保存视频失败，请重试。",
       "CANCELLED": "制作已取消。",
       "INTERNAL": "生成遇到问题，请重试。",
-      "NO_INSTALLER": "当前客户端未配置组件下载地址，请在桌面客户端打开本页或联系管理员。"
+      "NO_INSTALLER": "当前客户端未配置组件下载地址，请在桌面客户端打开本页或联系管理员。",
+      "ENV_NOT_VERIFIED": "制作组件已安装，但尚未完成验证。请点击「验证制作环境」完成一次简短检查。"
     },
     "previous": "上一步",
     "next": "下一步",

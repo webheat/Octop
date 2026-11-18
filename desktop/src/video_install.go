@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -96,6 +95,7 @@ func (m *videoManager) startEnvironmentInstall(token string) (VideoEnvironmentSt
 	m.mu.Lock()
 	if m.installRunning || m.environmentRunning || m.active != "" {
 		m.mu.Unlock()
+		navLogf("video install: refused, another install/check/render is already running")
 		return VideoEnvironmentStatus{}, videoErr("BUSY")
 	}
 	// A runtime override lets local builds and emergency source swaps avoid a
@@ -104,6 +104,7 @@ func (m *videoManager) startEnvironmentInstall(token string) (VideoEnvironmentSt
 	urls := manifestURLs(firstNonEmpty(os.Getenv("OCTOP_DESKTOP_VIDEO_COMPONENTS_URL"), defaultVideoComponentsURL))
 	if len(urls) == 0 {
 		m.mu.Unlock()
+		navLogf("video install: no components manifest URL is configured (build-time default is empty)")
 		return VideoEnvironmentStatus{}, videoErr("NO_INSTALLER")
 	}
 	m.installRunning = true
@@ -116,6 +117,7 @@ func (m *videoManager) startEnvironmentInstall(token string) (VideoEnvironmentSt
 	m.environment = status
 	m.environmentLogKey = environmentLogKey(status)
 	m.mu.Unlock()
+	navLogf("video install: started, manifest urls=%v", urls)
 	logVideoEnvironment(status)
 
 	go m.runEnvironmentInstall(urls)
@@ -123,35 +125,42 @@ func (m *videoManager) startEnvironmentInstall(token string) (VideoEnvironmentSt
 }
 
 func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
+	started := time.Now()
 	defer func() {
 		m.mu.Lock()
 		m.installRunning = false
 		m.mu.Unlock()
+		navLogf("video install: finished in %s", time.Since(started).Round(time.Millisecond))
 	}()
 
 	// Probe the DNS records behind the component host once. Every connection
 	// made by this client (manifest and parts alike) then prefers a reachable
 	// node, so a dead server in a round-robin DNS set cannot stall the install.
-	installClient := componentsDownloadClient(manifestURLs, log.Printf)
+	installClient := componentsDownloadClient(manifestURLs, navLogf)
 	manifest, err := bootstrap.LoadManifest(
 		manifestURLs, installClient, "",
-		func(format string, args ...any) { log.Printf("video install: "+format, args...) },
+		func(format string, args ...any) { navLogf("video install: "+format, args...) },
 	)
 	if err != nil {
+		navLogf("video install: the manifest could not be loaded: %v", err)
 		m.finishInstall("DOWNLOAD_FAILED")
 		return
 	}
+	navLogf("video install: manifest loaded version=%s platform=%s parts=%d", manifest.Version, manifest.Platform, len(manifest.Parts))
 	platform := componentsManifestPlatform()
 	if platform == "" || (manifest.Platform != "" && manifest.Platform != platform) {
+		navLogf("video install: platform mismatch, this host needs %q but the manifest serves %q", platform, manifest.Platform)
 		m.finishInstall("PACKAGE_INVALID")
 		return
 	}
 	root, err := videoRuntimeInstallDir()
 	if err != nil {
+		navLogf("video install: no writable install dir: %v", err)
 		m.finishInstall("ENV_DISK_FULL")
 		return
 	}
 	cacheDir := filepath.Join(m.environmentCache(), "install")
+	navLogf("video install: target dir=%s cache=%s", root, cacheDir)
 
 	// Weight progress by each part's declared size so a large core download
 	// does not jump from 0% to 50% the instant the small browser part finishes.
@@ -179,6 +188,9 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 				fraction = 1
 			}
 		}
+		// Log every progress tick: a stalled download must be visible as
+		// "stuck at N%" rather than as silence.
+		navLogf("video install: progress part=%s received=%d/%d total=%.1f%%", p.PartID, p.Received, p.Total, fraction*100)
 		m.setInstallProgress(stage, fraction)
 	}
 
@@ -190,7 +202,7 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		Merge:    true,
 		Progress: report,
 		Log: func(format string, args ...any) {
-			log.Printf("video install: "+format, args...)
+			navLogf("video install: "+format, args...)
 		},
 	})
 	if err != nil {
@@ -198,9 +210,11 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		if errors.Is(err, bootstrap.ErrChecksumMismatch) {
 			code = "PACKAGE_INVALID"
 		}
+		navLogf("video install: the parts could not be installed (code=%s): %v", code, err)
 		m.finishInstall(code)
 		return
 	}
+	navLogf("video install: all parts are in place under %s", root)
 
 	// Parts are in place. Let the existing checker decide whether the runtime
 	// is ready or still needs a one-off render verification.
@@ -214,6 +228,7 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		m.environment = status
 		m.environmentLogKey = environmentLogKey(status)
 		m.mu.Unlock()
+		navLogf("video install: the post-install check could not start: %v", err)
 		logVideoEnvironment(status)
 	}
 }
@@ -246,5 +261,6 @@ func (m *videoManager) finishInstall(code string) {
 	}
 	status := m.environment
 	m.mu.Unlock()
+	navLogf("video install: failed with code=%s", status.ErrorCode)
 	logVideoEnvironment(status)
 }

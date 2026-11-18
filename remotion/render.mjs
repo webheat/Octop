@@ -30,6 +30,12 @@ const LOCAL_NODE_MODULES = path.join(HERE, "node_modules");
  * Remotion downloads its own headless shell, but that download can be
  * unusably slow on some networks. A locally installed Chrome/Chromium
  * (Playwright's, or the system one) works just as well and is preferred.
+ *
+ * Set OCTOP_VIDEO_NO_SYSTEM_BROWSER=1 to skip the host-wide probes. The
+ * bundled headless shell and an explicit REMOTION_BROWSER_EXECUTABLE are
+ * still honoured. The switch exists because Windows restores the real
+ * ProgramFiles value inside child processes, so a test (or an operator) can
+ * otherwise not describe a machine without a browser.
  */
 export function detectBrowser() {
   const explicit = process.env.REMOTION_BROWSER_EXECUTABLE;
@@ -37,6 +43,8 @@ export function detectBrowser() {
 
   const bundled = path.join(HERE, "node_modules", ".remotion", "chrome-headless-shell", "win64", "chrome-headless-shell-win64", "chrome-headless-shell.exe");
   if (fs.existsSync(bundled)) return bundled;
+
+  if (process.env.OCTOP_VIDEO_NO_SYSTEM_BROWSER === "1") return null;
 
   const localAppData = process.env.LOCALAPPDATA;
   if (localAppData) {

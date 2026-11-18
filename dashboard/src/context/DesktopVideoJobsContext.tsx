@@ -173,6 +173,29 @@ export function DesktopVideoJobsProvider({
   );
   environmentOwnerRef.current = environmentOwnerId;
 
+  // Report every environment state change to the console. The desktop shell
+  // keeps the authoritative log on disk, but this is the trail the user can
+  // copy straight into a support report: which state the UI showed, when, and
+  // which error code it carried.
+  const lastEnvironmentLogRef = useRef<string>("");
+  useEffect(() => {
+    const key = [
+      environmentStatus.state,
+      environmentStatus.stage ?? "-",
+      environmentStatus.errorCode ?? "-",
+      environmentStatus.requiresInstall === true ? "install" : "no-install",
+    ].join("|");
+    if (key === lastEnvironmentLogRef.current) return;
+    lastEnvironmentLogRef.current = key;
+    const detail = environmentStatus.errorCode
+      ? ` code=${environmentStatus.errorCode}`
+      : "";
+    const install = environmentStatus.requiresInstall === true ? " install" : "";
+    console.info(
+      `[octop:video-env] state=${environmentStatus.state} stage=${environmentStatus.stage ?? "-"}${detail}${install}`,
+    );
+  }, [environmentStatus]);
+
   useEffect(() => {
     if (window.octopDesktopVideo?.version === 1) {
       setBridgeAvailable(true);

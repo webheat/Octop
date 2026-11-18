@@ -406,7 +406,11 @@
     "installingHint": "The first download takes a few minutes. Keep the client open. Components install next to the client and never modify system PATH.",
     "installFailedTitle": "Component installation failed",
     "installFailedHint": "Check your network and disk space, then try again or contact your administrator.",
-    "retryInstall": "Retry install"
+    "retryInstall": "Retry install",
+    "copyDiagnostics": "Copy diagnostics",
+    "diagnosticsTitle": "Octop video environment diagnostics",
+    "diagnosticsCopied": "Diagnostics copied — paste them to support",
+    "diagnosticsCopyFailed": "Copy failed; please note the status shown on the page"
   },
   "videoAnalysis": {
     "title": "Analyze target video",
@@ -742,7 +746,8 @@
       "SAVE_FAILED": "Could not save the video. Please retry.",
       "CANCELLED": "Video creation was cancelled.",
       "INTERNAL": "Video generation encountered a problem. Please retry.",
-      "NO_INSTALLER": "This client has no component download URL configured. Open this page in the desktop client or contact your administrator."
+      "NO_INSTALLER": "This client has no component download URL configured. Open this page in the desktop client or contact your administrator.",
+      "ENV_NOT_VERIFIED": "The production components are installed but have not been verified yet. Click \"Verify environment\" to run a short check."
     },
     "previous": "Previous",
     "next": "Next",

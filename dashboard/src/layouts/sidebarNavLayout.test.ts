@@ -177,10 +177,7 @@ describe("newly added nav entries", () => {
     // no "video-wizard" entry.
     const legacy = {
       groups: [{ id: "settings" }, { id: "control" }],
-      items: [
-        { key: "chat" },
-        { key: "video-environment", group: "control" },
-      ],
+      items: [{ key: "chat" }, { key: "video-environment", group: "control" }],
     };
     const editor = editorFromCatalog(sections, legacy);
     expect(editor.hidden).not.toContain("video-wizard");

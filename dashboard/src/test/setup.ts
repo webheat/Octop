@@ -21,6 +21,8 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+import zhBundle from "../locales/zh.json";
+import enBundle from "../locales/en.json";
 
 // --- ``DOMMatrix`` stub (needed by pdfjs-dist) ------------------------
 // jsdom and Node don't expose the CSSOM ``DOMMatrix`` global, but
@@ -194,6 +196,21 @@ vi.mock("react-i18next", async (importOriginal) => {
 
   type TOptions = Record<string, unknown> & { defaultValue?: string };
 
+  /** Dot-path lookup in a locale bundle, mirroring i18next's ``exists``. */
+  function bundleHasKey(bundle: unknown, key: string): boolean {
+    return (
+      key
+        .split(".")
+        .reduce<unknown>(
+          (acc, part) =>
+            acc && typeof acc === "object"
+              ? (acc as Record<string, unknown>)[part]
+              : undefined,
+          bundle,
+        ) !== undefined
+    );
+  }
+
   // Interpolate ``{{name}}`` placeholders like real i18next so tests can
   // assert user-visible copy such as "已捕获 42 条对话记忆".
   const interpolate = (template: string, options?: TOptions): string => {
@@ -218,7 +235,14 @@ vi.mock("react-i18next", async (importOriginal) => {
         }
         return key;
       },
-      i18n: { language: "zh", changeLanguage: () => Promise.resolve() },
+      i18n: {
+        language: "zh",
+        changeLanguage: () => Promise.resolve(),
+        // Components ask the instance whether a key exists (tool labels).
+        // Answer from the real bundles so the mock matches i18next.
+        exists: (key: string) =>
+          bundleHasKey(zhBundle, key) || bundleHasKey(enBundle, key),
+      },
     }),
     Trans: ({ children }: { children?: React.ReactNode }) => children,
   };
