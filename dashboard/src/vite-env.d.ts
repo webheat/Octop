@@ -15,6 +15,16 @@ declare global {
      * must not register a Service Worker that would cache a stale frontend.
      */
     octopDesktopShell?: boolean;
+    /**
+     * The shell's video bridge. Every shell since v1.4.0 injects it, so it is
+     * the signal that also identifies *older* shells.
+     */
+    octopDesktopVideo?: {
+      version: number;
+      minimalMode?: boolean;
+      environmentVersion?: number;
+      environmentInstallerURL?: string;
+    };
   }
 }
 

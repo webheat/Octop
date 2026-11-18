@@ -55,6 +55,46 @@ func landingPath(raw string) string {
 	return u.Path
 }
 
+// desktopURLFlag marks a dashboard URL as loaded by the desktop shell.
+//
+// Why a query flag
+// ---------------
+// The shell injects its JavaScript bridges *after* the page starts loading
+// (every 250ms for ~10s). The dashboard registers its Service Worker while
+// the page's first script runs — that is, before any bridge exists. A
+// worker registered at that moment caches the remote chunks inside the
+// WebView2 profile and keeps serving a stale build long after the server
+// deployed a new one (symptoms: the old video-environment page and missing
+// sidebar entries).
+//
+// The flag travels with the URL, so it is already there when the first
+// script runs: the dashboard can skip the registration entirely instead of
+// registering, purging and reloading again.
+const desktopURLFlag = "desktop"
+
+// withDesktopURLFlag adds `desktop=1` to a dashboard URL.
+//
+// Existing query parameters are preserved. A URL that cannot be parsed is
+// returned unchanged, because failing to add the flag must never stop the
+// shell from loading the dashboard.
+func withDesktopURLFlag(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return raw
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Get(desktopURLFlag) == "1" {
+		return trimmed
+	}
+	q.Set(desktopURLFlag, "1")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // minimalModeJS is a one-shot fallback for older dashboards that do not yet
 // implement minimal mode natively: hide the navigation rail once. It does not
 // observe the DOM, rewrite history or poll — the user is free to navigate
