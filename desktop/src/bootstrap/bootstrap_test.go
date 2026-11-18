@@ -521,6 +521,75 @@ func TestRunMergeLayersPartsIntoOneRoot(t *testing.T) {
 	}
 }
 
+// TestRunMergeAppendsToSharedTarget layers a root part, a wiping part and an
+// append part into the same tree — the shape of the sharded portable runtime
+// (runtime + launchers, then deps-core, then app, all under packages/).
+func TestRunMergeAppendsToSharedTarget(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "portable")
+
+	rootZip := filepath.Join(t.TempDir(), "runtime.zip")
+	writeTestZipEntries(t, rootZip, map[string]string{
+		"runtime/python.exe": "PYTHON",
+		"launch.py":          "LAUNCH",
+	})
+	depsZip := filepath.Join(t.TempDir(), "deps-core.zip")
+	writeTestZipEntries(t, depsZip, map[string]string{
+		"requests/__init__.py": "REQUESTS",
+	})
+	appZip := filepath.Join(t.TempDir(), "app.zip")
+	writeTestZipEntries(t, appZip, map[string]string{
+		"octop/__init__.py":            "OCTOP",
+		"octop-1.0.dist-info/METADATA": "Version: 1.0",
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime.zip":
+			serveRange(mustRead(t, rootZip), w, r)
+		case "/deps-core.zip":
+			serveRange(mustRead(t, depsZip), w, r)
+		case "/app.zip":
+			serveRange(mustRead(t, appZip), w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	rootData := mustRead(t, rootZip)
+	depsData := mustRead(t, depsZip)
+	appData := mustRead(t, appZip)
+	manifest := Manifest{
+		Version: "1.4.0-test",
+		Parts: []Part{
+			{ID: "runtime", URLs: []string{server.URL + "/runtime.zip"}, Size: int64(len(rootData)), SHA256: checksum(rootData), Format: "zip", Required: true},
+			{ID: "deps-core", URLs: []string{server.URL + "/deps-core.zip"}, Size: int64(len(depsData)), SHA256: checksum(depsData), Format: "zip", Target: "packages", Required: true},
+			{ID: "app", URLs: []string{server.URL + "/app.zip"}, Size: int64(len(appData)), SHA256: checksum(appData), Format: "zip", Target: "packages", Append: true, Required: true},
+		},
+	}
+	opts := testOptions(t, root, manifest)
+	opts.Merge = true
+	if err := Run(opts); err != nil {
+		t.Fatalf("sharded run failed: %v", err)
+	}
+
+	for name, want := range map[string]string{
+		"runtime/python.exe":                    "PYTHON",
+		"launch.py":                             "LAUNCH",
+		"packages/requests/__init__.py":         "REQUESTS",
+		"packages/octop/__init__.py":            "OCTOP",
+		"packages/octop-1.0.dist-info/METADATA": "Version: 1.0",
+	} {
+		got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatalf("missing %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s: got %q, want %q", name, got, want)
+		}
+	}
+}
+
 func mustRead(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

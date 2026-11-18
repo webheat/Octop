@@ -316,6 +316,27 @@ func TestEnsurePortableKeepsTheRuntimeWhenTheManifestIsUnreachable(t *testing.T)
 	}
 }
 
+// TestBootstrapRuntimeRejectsAManifestForAnotherPlatform makes sure a manifest
+// written for a different OS/arch never gets unpacked over this install.
+func TestBootstrapRuntimeRejectsAManifestForAnotherPlatform(t *testing.T) {
+	t.Setenv("OCTOP_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "portable")
+	manifest := &bootstrap.Manifest{
+		Version:  "1.2.0",
+		Platform: "plan9-z80",
+		Parts: []bootstrap.Part{{
+			ID:       "runtime",
+			URLs:     []string{"http://127.0.0.1:1/Octop-portable.zip"},
+			Format:   "zip",
+			Required: true,
+		}},
+	}
+	err := bootstrapRuntime(root, LocaleEN, func(string) {}, manifest)
+	if err == nil || !strings.Contains(err.Error(), "platform mismatch") {
+		t.Fatalf("expected a platform mismatch, got %v", err)
+	}
+}
+
 // serveTestRange answers range requests the way a release server does.
 func serveTestRange(data []byte, w http.ResponseWriter, r *http.Request) {
 	rangeHeader := r.Header.Get("Range")

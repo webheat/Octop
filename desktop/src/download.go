@@ -256,10 +256,21 @@ func bootstrapRuntime(root string, locale Locale, status func(string), manifest 
 	if err != nil {
 		return fmt.Errorf("%s", desktopText(locale, copyErrorRuntimeDownloadFailed, err))
 	}
+	// The runtime manifest is written per platform. A manifest for another
+	// platform must not be unpacked over this install (the video components
+	// path makes the same check in video_install.go).
+	platform := greenPlat()
+	if manifest != nil && manifest.Platform != "" && manifest.Platform != platform {
+		err := fmt.Errorf(
+			"platform mismatch: this host needs %s but the manifest serves %s",
+			platform, manifest.Platform,
+		)
+		return fmt.Errorf("%s", desktopText(locale, copyErrorRuntimeDownloadFailed, err))
+	}
 	opts := bootstrap.Options{
 		Root:     root,
 		CacheDir: filepath.Join(octopHome(), "portable-cache"),
-		Manifest: bootstrap.Manifest{Version: runtimeVersion(manifest), Parts: parts},
+		Manifest: bootstrap.Manifest{Version: runtimeVersion(manifest), Platform: platform, Parts: parts},
 		Client:   runtimeHTTPClient,
 		Progress: func(progress bootstrap.Progress) {
 			if progress.Total <= 0 {
@@ -268,6 +279,10 @@ func bootstrapRuntime(root string, locale Locale, status func(string), manifest 
 			status(desktopText(locale, copyStatusDownloadingRuntime, progress.Percent()))
 		},
 		Log: navLogf,
+		// A sharded runtime has one root part (runtime + launchers) followed by
+		// parts targeting packages/. Merge installs them in manifest order; the
+		// packer keeps the root part first, which bootstrap requires.
+		Merge: true,
 	}
 	status(desktopText(locale, copyStatusDownloadingRuntimeGo))
 	if err := bootstrap.Run(opts); err != nil {
