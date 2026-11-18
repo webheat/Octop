@@ -534,7 +534,22 @@
     "aiDescriptionFailed": "识别失败",
     "aiDescriptionModel": "模型",
     "aiDescriptionDone": "已识别 {{count}} 张图片",
-    "aiDescriptionPartial": "{{failed}} 张图片识别失败，可单独重试"
+    "aiDescriptionPartial": "{{failed}} 张图片识别失败，可单独重试",
+    "importDirectory": "目录导入",
+    "importSelectHint": "选择一个包含产品图片的文件夹（含子目录），系统会逐张识别并按产品自动分组。建议使用 Chrome / Edge 浏览器。",
+    "importSelected": "已选择 {{count}} 个文件",
+    "importCostHint": "识别会消耗模型额度，相同图片不会重复识别。请在确认前复核分组结果。",
+    "importAnalyze": "开始识别（{{count}} 个文件）",
+    "importReviewHint": "复核自动分组：可修改产品名/品类，勾选要排除的图片，或用下拉框把图片移动到其它分组。",
+    "importBack": "重新选择",
+    "importCancel": "取消",
+    "importConfirm": "确认归档",
+    "importDone": "导入完成",
+    "importResult": "新建 {{products}} 个产品，导入 {{assets}} 张图片，跳过 {{duplicates}} 张重复图片",
+    "importSkipped": "已跳过 {{count}} 个非图片文件",
+    "importFailedCount": "{{count}} 张图片识别失败",
+    "importNoGroups": "没有识别到可归档的图片",
+    "importFailed": "导入失败，请稍后重试"
   },
   "videoWizard": {
     "title": "产品视频制作向导",

@@ -1,8 +1,18 @@
 # 产品素材库：目录图片批量识别与归档
 
-> 状态：设计提案（尚未实现）
+> 状态：**M1 已实现**（Web 目录导入 + 视觉分类 + 人工确认归档）
 > 目标读者：后端 / 前端 / 测试
 > 关联功能：产品素材库 `/product-library`（见 [product-material-library.md](product-material-library.md)）
+>
+> M1 落地清单（与下文设计对应）：
+> - `src/octop/infra/product_library/vision.py` — `CATEGORISE_PROMPT` / `categorise_image()` / `parse_categorisation_payload()`
+> - `src/octop/infra/product_library/batch_import.py` — `analyse_upload()` / `commit_import()`（预去重、分组、归档、owner 隔离、job manifest）
+> - `src/octop/api/routers/product_library.py` — `POST /product-library/imports/analyze` 与 `/imports/commit`
+> - `dashboard/src/pages/ProductLibrary/index.tsx` — 产品列表「目录导入」按钮 + 三步向导 Modal
+> - `dashboard/src/api/modules/productLibrary.ts` — `analyzeImport` / `commitImport`
+> - `tests/unit/product_library/test_batch_import.py` — 9 个用例（分类校验、分组、去重、权限、失败隔离、router 接线）
+>
+> M2（任务持久化/进度）与 M3（桌面端目录对话框）尚未实现。
 
 ## 1. 背景与问题
 

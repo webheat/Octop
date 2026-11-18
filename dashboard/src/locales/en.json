@@ -534,7 +534,22 @@
     "aiDescriptionFailed": "AI description failed",
     "aiDescriptionModel": "Model",
     "aiDescriptionDone": "Described {{count}} images",
-    "aiDescriptionPartial": "{{failed}} images failed; retry them individually"
+    "aiDescriptionPartial": "{{failed}} images failed; retry them individually",
+    "importDirectory": "Import directory",
+    "importSelectHint": "Choose a folder of product images (subfolders included). Each image is described and grouped by product. Chrome / Edge recommended.",
+    "importSelected": "{{count}} files selected",
+    "importCostHint": "Recognition uses model quota. Identical images are only processed once. Review the groups before confirming.",
+    "importAnalyze": "Analyze ({{count}} files)",
+    "importReviewHint": "Review the groups: edit product name/category, uncheck images to exclude, or use the dropdown to move an image to another group.",
+    "importBack": "Reselect",
+    "importCancel": "Cancel",
+    "importConfirm": "Confirm & archive",
+    "importDone": "Import complete",
+    "importResult": "Created {{products}} products, imported {{assets}} images, skipped {{duplicates}} duplicates",
+    "importSkipped": "Skipped {{count}} non-image files",
+    "importFailedCount": "{{count}} images failed recognition",
+    "importNoGroups": "No images could be grouped",
+    "importFailed": "Import failed, please try again"
   },
   "videoWizard": {
     "title": "Product video wizard",

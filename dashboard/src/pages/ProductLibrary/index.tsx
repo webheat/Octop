@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
+  Checkbox,
   Descriptions,
   Empty,
   Input,
@@ -18,6 +19,7 @@ import {
   Download,
   FilePlus2,
   FileVideo,
+  FolderOpen,
   Package,
   Plus,
   Sparkles,
@@ -29,6 +31,9 @@ import { useNavigate } from "react-router-dom";
 import { request } from "../../api/request";
 import {
   productLibraryApi,
+  type ImportCommitGroup,
+  type ImportGroup,
+  type ImportResult,
   type Product,
   type ProductAsset,
   type ProductProject,
@@ -132,6 +137,21 @@ export default function ProductLibraryPage() {
   );
   const [describeBusy, setDescribeBusy] = useState<string | null>(null);
   const [describeBatchBusy, setDescribeBatchBusy] = useState(false);
+  // Directory import wizard state.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState<0 | 1 | 2>(0);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importJobId, setImportJobId] = useState("");
+  const [importGroups, setImportGroups] = useState<ImportGroup[]>([]);
+  const [importExcluded, setImportExcluded] = useState<number[]>([]);
+  const [importSkipped, setImportSkipped] = useState<
+    { filename: string; reason: string }[]
+  >([]);
+  const [importFailed, setImportFailed] = useState<
+    { filename: string; reason: string }[]
+  >([]);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const selectProduct = (product: Product | null) => {
     if (activeProductId.current !== product?.id) {
@@ -530,6 +550,88 @@ export default function ProductLibraryPage() {
       if (accountVersion === ownerVersion.current) setDescribeBatchBusy(false);
     }
   };
+
+  // ---- Directory import wizard ----
+  const openImport = () => {
+    setImportStep(0);
+    setImportFiles([]);
+    setImportJobId("");
+    setImportGroups([]);
+    setImportExcluded([]);
+    setImportSkipped([]);
+    setImportFailed([]);
+    setImportOpen(true);
+  };
+  const analyseImport = async () => {
+    if (!importFiles.length) return;
+    setImportBusy(true);
+    try {
+      const result = await productLibraryApi.analyzeImport(importFiles);
+      setImportJobId(result.job_id);
+      setImportGroups(result.groups);
+      setImportSkipped(result.skipped);
+      setImportFailed(result.failed);
+      setImportExcluded([]);
+      setImportStep(1);
+    } catch {
+      message.error(t("productLibrary.importFailed"));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  const commitImport = async () => {
+    if (!importJobId) return;
+    setImportBusy(true);
+    try {
+      const groups: ImportCommitGroup[] = importGroups.map((group) => ({
+        product_id: null,
+        name: group.suggested_name,
+        category: group.category,
+        item_indices: group.items
+          .filter((item) => !importExcluded.includes(item.index))
+          .map((item) => item.index),
+      }));
+      const result = await productLibraryApi.commitImport({
+        job_id: importJobId,
+        groups,
+        exclude_indices: importExcluded,
+      });
+      setImportStep(2);
+      setImportResult(result);
+      await reload();
+    } catch {
+      message.error(t("productLibrary.importFailed"));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  const moveItem = (index: number, fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return;
+    setImportGroups((groups) =>
+      groups.map((group) => {
+        if (group.key === fromKey)
+          return {
+            ...group,
+            items: group.items.filter((item) => item.index !== index),
+          };
+        if (group.key === toKey) {
+          const source = groups
+            .find((g) => g.key === fromKey)
+            ?.items.find((item) => item.index === index);
+          return source ? { ...group, items: [...group.items, source] } : group;
+        }
+        return group;
+      }),
+    );
+  };
+  const renameGroup = (key: string, patch: Partial<ImportGroup>) => {
+    setImportGroups((groups) =>
+      groups.map((group) =>
+        group.key === key ? { ...group, ...patch } : group,
+      ),
+    );
+  };
+
   const createProject = async () => {
     if (!active || !projectName.trim()) return;
     const accountVersion = ownerVersion.current;
@@ -763,13 +865,18 @@ export default function ProductLibraryPage() {
         <Card
           title={t("productLibrary.products")}
           extra={
-            <Button
-              type="primary"
-              icon={<Plus size={16} />}
-              onClick={openCreate}
-            >
-              {t("productLibrary.addProduct")}
-            </Button>
+            <Space size={8}>
+              <Button icon={<FolderOpen size={16} />} onClick={openImport}>
+                {t("productLibrary.importDirectory")}
+              </Button>
+              <Button
+                type="primary"
+                icon={<Plus size={16} />}
+                onClick={openCreate}
+              >
+                {t("productLibrary.addProduct")}
+              </Button>
+            </Space>
           }
         >
           <Input.Search
@@ -1572,6 +1679,199 @@ export default function ProductLibraryPage() {
             rows={2}
           />
         </Space>
+      </Modal>
+      <Modal
+        open={importOpen}
+        title={t("productLibrary.importDirectory")}
+        width={720}
+        onCancel={() => setImportOpen(false)}
+        footer={
+          <Space>
+            {importStep === 1 && (
+              <Button onClick={() => setImportStep(0)}>
+                {t("productLibrary.importBack")}
+              </Button>
+            )}
+            <Button onClick={() => setImportOpen(false)}>
+              {t("productLibrary.importCancel")}
+            </Button>
+            {importStep === 0 && (
+              <Button
+                type="primary"
+                loading={importBusy}
+                disabled={!importFiles.length}
+                onClick={() => void analyseImport()}
+              >
+                {t("productLibrary.importAnalyze", {
+                  count: importFiles.length,
+                })}
+              </Button>
+            )}
+            {importStep === 1 && (
+              <Button
+                type="primary"
+                loading={importBusy}
+                onClick={() => void commitImport()}
+              >
+                {t("productLibrary.importConfirm")}
+              </Button>
+            )}
+          </Space>
+        }
+      >
+        {importStep === 0 && (
+          <Space direction="vertical" style={{ width: "100%" }} size={12}>
+            <Typography.Text type="secondary">
+              {t("productLibrary.importSelectHint")}
+            </Typography.Text>
+            <input
+              type="file"
+              // @ts-expect-error webkitdirectory is a valid browser attribute.
+              webkitdirectory=""
+              directory=""
+              multiple
+              onChange={(event) =>
+                setImportFiles(Array.from(event.target.files ?? []))
+              }
+            />
+            {importFiles.length > 0 && (
+              <Typography.Text>
+                {t("productLibrary.importSelected", {
+                  count: importFiles.length,
+                })}
+              </Typography.Text>
+            )}
+            <Typography.Text type="warning">
+              {t("productLibrary.importCostHint")}
+            </Typography.Text>
+          </Space>
+        )}
+        {importStep === 1 && (
+          <Space direction="vertical" style={{ width: "100%" }} size={12}>
+            <Typography.Text>
+              {t("productLibrary.importReviewHint")}
+            </Typography.Text>
+            {importSkipped.length > 0 && (
+              <Typography.Text type="secondary">
+                {t("productLibrary.importSkipped", {
+                  count: importSkipped.length,
+                })}
+              </Typography.Text>
+            )}
+            {importFailed.length > 0 && (
+              <Typography.Text type="warning">
+                {t("productLibrary.importFailedCount", {
+                  count: importFailed.length,
+                })}
+              </Typography.Text>
+            )}
+            {importGroups.length === 0 && (
+              <Empty
+                description={t("productLibrary.importNoGroups")}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            )}
+            {importGroups.map((group) => (
+              <Card
+                key={group.key}
+                size="small"
+                title={
+                  <Space>
+                    <Input
+                      value={group.suggested_name}
+                      placeholder={t("productLibrary.name")}
+                      onChange={(e) =>
+                        renameGroup(group.key, {
+                          suggested_name: e.target.value,
+                        })
+                      }
+                      style={{ width: 200 }}
+                    />
+                    <Input
+                      value={group.category}
+                      placeholder={t("productLibrary.category")}
+                      onChange={(e) =>
+                        renameGroup(group.key, { category: e.target.value })
+                      }
+                      style={{ width: 120 }}
+                    />
+                    <Tag>{group.items.length}</Tag>
+                  </Space>
+                }
+              >
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  {group.items.map((item) => (
+                    <Space
+                      key={item.index}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <Checkbox
+                        checked={!importExcluded.includes(item.index)}
+                        onChange={(e) =>
+                          setImportExcluded((prev) =>
+                            e.target.checked
+                              ? prev.filter((i) => i !== item.index)
+                              : [...prev, item.index],
+                          )
+                        }
+                      >
+                        <Typography.Text
+                          style={{
+                            textDecoration: importExcluded.includes(item.index)
+                              ? "line-through"
+                              : undefined,
+                          }}
+                        >
+                          {item.filename}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">
+                          {" "}
+                          ({Math.round(item.confidence * 100)}%)
+                        </Typography.Text>
+                      </Checkbox>
+                      <Select
+                        size="small"
+                        value={group.key}
+                        style={{ width: 140 }}
+                        onChange={(toKey) =>
+                          moveItem(item.index, group.key, toKey)
+                        }
+                        options={importGroups.map((g) => ({
+                          value: g.key,
+                          label: g.suggested_name || g.key,
+                        }))}
+                      />
+                    </Space>
+                  ))}
+                </Space>
+              </Card>
+            ))}
+          </Space>
+        )}
+        {importStep === 2 && importResult && (
+          <Space direction="vertical" style={{ width: "100%" }} size={12}>
+            <Typography.Text strong>
+              {t("productLibrary.importDone")}
+            </Typography.Text>
+            <Typography.Text>
+              {t("productLibrary.importResult", {
+                products: importResult.created_products,
+                assets: importResult.imported_assets,
+                duplicates: importResult.skipped_duplicates,
+              })}
+            </Typography.Text>
+            {importResult.failed.length > 0 && (
+              <Typography.Text type="warning">
+                {t("productLibrary.importFailedCount", {
+                  count: importResult.failed.length,
+                })}
+              </Typography.Text>
+            )}
+          </Space>
+        )}
       </Modal>
     </PageShell>
   );
