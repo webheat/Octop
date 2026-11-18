@@ -18,6 +18,7 @@ from octop.api.deps import current_user, get_server
 from octop.config import DEFAULT_MAX_UPLOAD_MB, upload_mb_to_bytes
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.product_library.audio import load_catalog, pick_track, track_path
+from octop.infra.product_library.batch_import import analyse_upload, commit_import
 from octop.infra.product_library.llm_video_planner import generate_model_plan
 from octop.infra.product_library.narration import (
     PAID_VOICE_PRESETS,
@@ -142,6 +143,56 @@ class DescribeMissingResponse(BaseModel):
     succeeded: int
     failed: int
     items: list[AssetResponse]
+
+
+class ImportItem(BaseModel):
+    index: int
+    filename: str
+    confidence: float = 0.0
+    description: str = ""
+    tags: list[str] = []
+    duplicate: bool = False
+
+
+class ImportGroup(BaseModel):
+    key: str
+    suggested_name: str = ""
+    category: str = ""
+    items: list[ImportItem] = []
+
+
+class ImportNotice(BaseModel):
+    filename: str
+    reason: str
+
+
+class ImportAnalysisResponse(BaseModel):
+    job_id: str
+    total: int
+    groups: list[ImportGroup]
+    skipped: list[ImportNotice]
+    failed: list[ImportNotice]
+
+
+class ImportCommitGroup(BaseModel):
+    product_id: str | None = None
+    name: str = ""
+    category: str = ""
+    item_indices: list[int] = []
+
+
+class ImportCommitBody(BaseModel):
+    job_id: str
+    groups: list[ImportCommitGroup]
+    exclude_indices: list[int] = []
+
+
+class ImportCommitResponse(BaseModel):
+    created_products: int
+    reused_products: int
+    imported_assets: int
+    skipped_duplicates: int
+    failed: list[ImportNotice] = []
 
 
 class PreparedResponse(BaseModel):
@@ -338,6 +389,62 @@ async def upload_assets(
             )
         )
     return {"items": stored}
+
+
+@router.post(
+    "/product-library/imports/analyze",
+    response_model=ImportAnalysisResponse,
+    summary="Categorise a directory of images into suggested product groups (dry run)",
+    description=(
+        "Accepts the files picked by the browser's directory selector, runs one "
+        "vision call per distinct image and returns a reviewable grouping plan. "
+        "Writes no products or assets; the files are kept in a temporary job "
+        "directory until commit."
+    ),
+)
+async def analyse_import(
+    files: list[UploadFile] = File(...),
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    service = _service(server)
+    max_bytes = int(
+        server.services.config.max_upload_bytes or upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
+    )
+    payload: list[tuple[str, str, bytes]] = []
+    for file in files:
+        filename = Path(file.filename or "upload.bin").name
+        data = await read_upload_capped(file, max_bytes=max_bytes)
+        payload.append((filename, file.content_type or "", data))
+    return await analyse_upload(
+        service,
+        server.services.provider_repo,
+        owner_id=user.id,
+        files=payload,
+    )
+
+
+@router.post(
+    "/product-library/imports/commit",
+    response_model=ImportCommitResponse,
+    summary="Archive a reviewed import plan into products and assets",
+)
+async def commit_import_plan(
+    body: ImportCommitBody,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            commit_import,
+            _service(server),
+            owner_id=user.id,
+            job_id=body.job_id,
+            groups=[group.model_dump() for group in body.groups],
+            exclude_indices=body.exclude_indices,
+        )
+    except (PermissionError, FileNotFoundError, ValueError) as exc:
+        raise _not_found() from exc
 
 
 @router.patch(

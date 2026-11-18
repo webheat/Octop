@@ -25,6 +25,8 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_TAGS = 12
 MAX_DESCRIPTION_CHARS = 2000
 MAX_ERROR_CHARS = 500
+MAX_GROUP_CHARS = 120
+MAX_CATEGORY_CHARS = 60
 
 _PROMPT = (
     "You are cataloguing a product image for a media asset library. "
@@ -35,6 +37,23 @@ _PROMPT = (
     '"description" (2-4 plain sentences, no markdown) and '
     '"tags" (3-8 short searchable keyword strings). '
     "Use the language of any visible text, otherwise use Chinese."
+)
+
+# Structured variant used by directory import. It asks for a grouping hint so
+# images can be archived under a product. Kept separate from _PROMPT so the
+# existing "batch describe" behaviour never changes.
+CATEGORISE_PROMPT = (
+    "You are cataloguing product photos for a media asset library. "
+    "Look only at what is actually visible; never invent brands, prices, "
+    "specifications or certifications. Return ONLY one JSON object with exactly "
+    "five keys: "
+    '"group" (a short product name inferred from the visible subject, or an '
+    "empty string if the product cannot be identified), "
+    '"category" (one concise category word, or an empty string if unclear), '
+    '"description" (2-4 plain sentences of only what is visible, no markdown), '
+    '"tags" (3-8 short searchable keyword strings), and '
+    '"confidence" (a float from 0 to 1 for how sure you are of the grouping). '
+    "Use Chinese unless the visible text is in another language."
 )
 
 
@@ -74,6 +93,78 @@ def parse_description_payload(raw: str) -> tuple[str, list[str]]:
         if isinstance(tag, (str, int, float)) and not isinstance(tag, bool)
     ]
     return description.strip()[:MAX_DESCRIPTION_CHARS], [tag for tag in tags if tag][:MAX_TAGS]
+
+
+def parse_categorisation_payload(raw: str) -> dict[str, Any]:
+    """Validate a categorise_image answer before anything is persisted.
+
+    Mirrors ``parse_description_payload`` but additionally accepts a grouping
+    hint and a confidence score. Model output is untrusted: every field is
+    type-checked and bounded, and malformed answers raise ``ValueError``.
+    """
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("model output is not a JSON object")
+
+    description = payload.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("model output has no description")
+
+    raw_tags = payload.get("tags", [])
+    if not isinstance(raw_tags, list):
+        raise ValueError("model output tags must be a list")
+    tags = [
+        str(tag).strip()
+        for tag in raw_tags
+        if isinstance(tag, (str, int, float)) and not isinstance(tag, bool)
+    ]
+
+    group = payload.get("group", "")
+    if not isinstance(group, str):
+        raise ValueError("model output group must be a string")
+    category = payload.get("category", "")
+    if not isinstance(category, str):
+        raise ValueError("model output category must be a string")
+
+    raw_confidence = payload.get("confidence", 0.0)
+    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+        raise ValueError("model output confidence must be a number")
+    confidence = max(0.0, min(1.0, float(raw_confidence)))
+
+    return {
+        "group": group.strip()[:MAX_GROUP_CHARS],
+        "category": category.strip()[:MAX_CATEGORY_CHARS],
+        "description": description.strip()[:MAX_DESCRIPTION_CHARS],
+        "tags": [tag for tag in tags if tag][:MAX_TAGS],
+        "confidence": confidence,
+    }
+
+
+def categorise_image(data: bytes, media_type: str, model: Any) -> dict[str, Any]:
+    """One bounded vision call returning a validated categorisation payload.
+
+    Uses the same base64 image channel as ``describe_image`` but a dedicated
+    structured prompt. The caller owns provider resolution and concurrency.
+    """
+    if model is None:
+        raise ValueError("categorise_image requires a model")
+    encoded = base64.b64encode(data).decode("ascii")
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": CATEGORISE_PROMPT},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+            },
+        ]
+    )
+    text = llm_text_content(model.invoke([message]))
+    if not text.strip():
+        raise ValueError("vision model returned an empty response")
+    return parse_categorisation_payload(text)
 
 
 def describe_image(data: bytes, media_type: str, model: Any) -> tuple[str, list[str]]:
