@@ -130,6 +130,83 @@ tasks:
       VERSION: '{{.VERSION | default "dev"}}'
       PORTABLE_ZIP: '{{.PORTABLE_ZIP | default (printf "../portable/release/Octop-portable-windows-%s-%s.zip" .ARCH .VERSION)}}'
 
+  # No-install zip: the bare Octop.exe plus a usage note. No NSIS, no
+  # registry, no Program Files. Windows flags unsigned installers (SmartScreen
+  # / AV heuristics on the NSIS packer); a plain exe inside a zip trips far
+  # fewer rules, and Unblock.bat clears the "downloaded from the internet"
+  # marker that survives the extraction.
+  package:green:
+    summary: Packages the no-install zip (remote client, no NSIS installer)
+    cmds:
+      - task: '{{if .PORTABLE_RUNTIME_URL}}package:green:slim{{else}}package:green:thin{{end}}'
+
+  package:green:thin:
+    summary: Zips the remote client for no-install use
+    cmds:
+      - task: build
+        vars:
+          PRODUCTION: "true"
+          ARCH: "{{.ARCH}}"
+          VERSION: "{{.VERSION}}"
+          DEFAULT_SERVER_URL: "{{.DEFAULT_SERVER_URL}}"
+          VIDEO_COMPONENTS_URL: "{{.VIDEO_COMPONENTS_URL}}"
+      - task: create:green:zip
+        vars:
+          ARCH: "{{.ARCH}}"
+          VERSION: "{{.VERSION}}"
+          OUTPUT_NAME: "{{.APP_NAME}}-desktop-windows-{{.ARCH}}-{{.VERSION}}.zip"
+          README: "README-remote.txt"
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+      VERSION: '{{.VERSION | default "dev"}}'
+
+  package:green:slim:
+    summary: Zips the slim client for no-install use (runtime fetched on first launch)
+    cmds:
+      - task: build
+        vars:
+          PRODUCTION: "true"
+          ARCH: "{{.ARCH}}"
+          VERSION: "{{.VERSION}}"
+          # Same rule as package:slim — a local runtime must not carry a remote
+          # dashboard target, or the runtime download is skipped entirely.
+          DEFAULT_SERVER_URL: ""
+          PORTABLE_RUNTIME_URL: "{{.PORTABLE_RUNTIME_URL}}"
+          VIDEO_COMPONENTS_URL: "{{.VIDEO_COMPONENTS_URL}}"
+      - task: create:green:zip
+        vars:
+          ARCH: "{{.ARCH}}"
+          VERSION: "{{.VERSION}}"
+          OUTPUT_NAME: "{{.APP_NAME}}-desktop-slim-windows-{{.ARCH}}-{{.VERSION}}.zip"
+          README: "README-slim.txt"
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+      VERSION: '{{.VERSION | default "dev"}}'
+
+  create:green:zip:
+    summary: Zips Octop.exe with a usage note and the unblock helper
+    cmds:
+      # The WebView2 bootstrapper is optional: it only helps machines without
+      # the runtime. It is Microsoft-signed, so it never trips the block we are
+      # dodging. Generation needs network access — skip it when offline.
+      - sh: 'mkdir -p "{{.ROOT_DIR}}/bin/green-webview2" && wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/bin/green-webview2" || true'
+      # The PowerShell lives in a script file: a -Command one-liner would have
+      # its $variables eaten by the shell that go-task spawns.
+      - cmd: >-
+          powershell -NoProfile -ExecutionPolicy Bypass
+          -File "{{.ROOT_DIR}}/build/windows/green/make-zip.ps1"
+          -Exe "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe"
+          -Readme "{{.ROOT_DIR}}/build/windows/green/{{.README}}"
+          -Unblock "{{.ROOT_DIR}}/build/windows/green/Unblock.bat"
+          -ExtraExeDir "{{.ROOT_DIR}}/bin/green-webview2"
+          -Output "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.OUTPUT_NAME}}"
+          -Stage "{{.ROOT_DIR}}/{{.BIN_DIR}}/green-stage"
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+      VERSION: '{{.VERSION | default "dev"}}'
+      OUTPUT_NAME: '{{.APP_NAME}}-desktop-windows-{{.ARCH}}-{{.VERSION}}.zip'
+      README: "README-remote.txt"
+
   create:nsis:installer:
     summary: Wraps Octop.exe in an NSIS installer (Program Files + shortcuts)
     dir: build/windows/nsis
