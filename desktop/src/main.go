@@ -344,6 +344,10 @@ func (a *App) showDashboard(base string) {
 		a.minimalLandingPath = landingPath(landing)
 		a.mu.Unlock()
 	}
+	// Tag the URL so the dashboard can tell it is inside the desktop shell
+	// before its first script runs, and therefore never register a Service
+	// Worker that would pin this profile to a stale build.
+	landing = withDesktopURLFlag(landing)
 	a.navigate(landing)
 	if a.video == nil {
 		a.video = newVideoManager(base)

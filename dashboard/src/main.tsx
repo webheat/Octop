@@ -13,6 +13,11 @@ import {
   tryReloadOnStaleChunk,
 } from "./utils/reloadOnStaleChunk";
 import { bootNativeWindowChrome } from "./utils/nativeWindowChrome";
+import {
+  markDesktopProfile,
+  shouldSkipServiceWorker,
+  whenDesktopShellDetected,
+} from "./desktopShellDetection";
 
 if (typeof window !== "undefined") {
   // Recover from post-deploy stale hashed chunks (white screen → soft reload).
@@ -79,31 +84,55 @@ void initI18n()
 // Register SW as early as possible so beforeinstallprompt can fire before the
 // user clicks the header install button (deferring to "load" caused a race).
 // DEV clears stale production workers, then registers the notification worker.
-// The desktop shell must never register a Service Worker that could cache a
-// stale frontend independently of the shell.
 //
-// `window.octopDesktop` is the Electron-style bridge and is absent in the thin
-// (remote) Wails build, so the shell also sets `window.octopDesktopShell`.
-// Without that marker the remote page believed it was a browser, registered
-// the production worker, and the WebView2 profile kept serving a stale
-// Dashboard long after the server deployed a new build.
-if (typeof window !== "undefined" && !window.octopDesktop && !window.octopDesktopShell) {
+// The desktop shell must never keep a Service Worker: it serves the Dashboard
+// from the server, so a cached worker pins the client to an outdated build
+// long after the server deployed a new one (old video-environment page,
+// missing sidebar entries).
+//
+// The decision is made from three signals, because they become available at
+// different moments:
+//   - `?desktop=1` in the URL — the shell appends it to the landing URL, so
+//     it is already there when this first script runs. This is what actually
+//     prevents the worker from being registered in the first place.
+//   - the persisted profile marker — a later navigation inside the shell
+//     (the flag is only on the landing URL) still knows it must not register.
+//   - the injected bridges — the shell injects them after the page started
+//     loading, so they only ever confirm what the first two already decided.
+//
+// Note there is deliberately no "purge then reload" dance here: reloading
+// would re-run this code, which would register a worker again and start the
+// purge/reload cycle over again. The desktop client simply never registers.
+const isDesktop = shouldSkipServiceWorker();
+
+if (typeof window !== "undefined" && !isDesktop) {
   void import("./sw-register").then(({ registerSW }) => registerSW());
 }
 
-// The desktop shell serves the Dashboard from the server, so a leftover
-// Service Worker can only ever pin the client to an outdated build. Drop it
-// (and its caches) before the app renders the stale page.
-//
-// The shell injects `window.octopDesktopShell` and performs the same purge on
-// its side, then reloads the document that the stale worker had rendered. The
-// page only has to make sure no worker survives — reloading here as well
-// would race the shell's reload.
-if (typeof window !== "undefined" && window.octopDesktopShell) {
+// Desktop shell (including older shells, which only inject
+// `window.octopDesktopVideo`): drop any Service Worker that an earlier
+// version of the client left behind in this WebView2 profile, so the profile
+// stops serving a stale build. No reload happens here — the page that is
+// already on screen was rendered by the stale worker, but the next
+// navigation (or the next start) picks up the fresh assets, and a reload
+// during start-up would fight the shell's own navigation.
+whenDesktopShellDetected(() => {
+  markDesktopProfile();
   void import("./sw-register").then(async ({ purgeStaleServiceWorker }) => {
     const purged = await purgeStaleServiceWorker();
     if (purged) {
-      console.info("[SW] Removed a stale Service Worker left by an older desktop build.");
+      console.info(
+        "[SW] Removed a stale Service Worker left by an older desktop build.",
+      );
     }
+  });
+});
+
+// A profile that was marked as a desktop profile by an earlier session must
+// not keep a worker either — even if this navigation lost the URL flag.
+if (isDesktop) {
+  markDesktopProfile();
+  void import("./sw-register").then(async ({ purgeStaleServiceWorker }) => {
+    await purgeStaleServiceWorker();
   });
 }
