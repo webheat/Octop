@@ -25,6 +25,18 @@ declare global {
       environmentVersion?: number;
       environmentInstallerURL?: string;
     };
+    /**
+     * The shell's runtime bridge. It installs optional runtime shards (the
+     * Tencent Cloud SDK part, for example) when the server reports that a
+     * feature misses its optional component.
+     */
+    octopDesktopRuntime?: {
+      version: number;
+      request(
+        action: string,
+        payload?: Record<string, unknown>,
+      ): Promise<unknown>;
+    };
   }
 }
 
