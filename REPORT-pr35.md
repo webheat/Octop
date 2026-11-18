@@ -187,4 +187,4 @@ ok  	octop.desktop/bootstrap	0.029s
 | commit | 内容 |
 |---|---|
 | `b914dad4` | `bootstrap.RunParts` 原型 + 单测（纯新增） |
-| （本次） | 设计文档 + 本报告 |
+| `5550e655` | 设计文档 + 本报告 |
