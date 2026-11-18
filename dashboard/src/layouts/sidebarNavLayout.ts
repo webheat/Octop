@@ -79,6 +79,23 @@ function defaultKeyOrder(state: SidebarNavEditorState): string[] {
   ];
 }
 
+/**
+ * Nav entries introduced after the user's layout was saved.
+ *
+ * A stored layout is an explicit placement list: every catalog key that the
+ * layout does not mention ends up hidden (see `editorFromCatalog`). That is
+ * right for entries the user deliberately removed, but wrong for entries a
+ * *newer* build added — the user never got a chance to place them, so hiding
+ * them makes the feature unreachable until they open the customizer.
+ *
+ * Newly added keys therefore fall back to their default position (creating
+ * their default group when the layout predates it). A key the user explicitly
+ * hid stays hidden, and entries the layout already places are left alone.
+ */
+export const NEWLY_ADDED_NAV_KEYS = ["video-wizard"] as const;
+
+const NEWLY_ADDED_NAV_KEY_SET = new Set<string>(NEWLY_ADDED_NAV_KEYS);
+
 /** Editor model for the drawer. A missing layout is the system default. */
 export function editorFromCatalog(
   sections: NavSection[],
@@ -88,6 +105,14 @@ export function editorFromCatalog(
   if (!layout) return base;
 
   const catalogKeys = new Set(defaultKeyOrder(base));
+  const defaultPlacements = defaultEditor(sections);
+  const defaultGroupOf = new Map<string, string | null>();
+  for (const group of defaultPlacements.groups) {
+    for (const key of defaultPlacements.itemsByGroup[group.id] ?? []) {
+      defaultGroupOf.set(key, group.id);
+    }
+  }
+
   const groups: SidebarNavGroup[] = [];
   const groupIds = new Set<string>();
   for (const group of layout.groups) {
@@ -95,6 +120,7 @@ export function editorFromCatalog(
     groupIds.add(group.id);
     groups.push({ id: group.id, name: group.name ?? null });
   }
+
   const itemsByGroup: Record<string, string[]> = {};
   for (const group of groups) itemsByGroup[group.id] = [];
 
@@ -114,8 +140,31 @@ export function editorFromCatalog(
       ungrouped.push(item.key);
     }
   }
+  // Keys the layout never mentions were either removed by the user or added
+  // after the layout was saved. Newly added entries fall back to the default
+  // placement so a fresh feature is reachable without touching the
+  // customizer; everything else keeps the "hidden" meaning.
+  //
+  // Entries the layout does place keep their placement — a group the user
+  // never created (because it arrived with a newer build) is created on demand
+  // for the new entry, without moving anything the user had arranged.
   for (const key of defaultKeyOrder(base)) {
-    if (!seen.has(key)) hidden.push(key);
+    if (seen.has(key)) continue;
+    if (!NEWLY_ADDED_NAV_KEY_SET.has(key)) {
+      hidden.push(key);
+      continue;
+    }
+    const groupId = defaultGroupOf.get(key) ?? null;
+    if (!groupId) {
+      ungrouped.push(key);
+      continue;
+    }
+    if (!groupIds.has(groupId)) {
+      groupIds.add(groupId);
+      groups.push({ id: groupId, name: null });
+      itemsByGroup[groupId] = [];
+    }
+    itemsByGroup[groupId].push(key);
   }
   return { groups, ungrouped, itemsByGroup, hidden };
 }

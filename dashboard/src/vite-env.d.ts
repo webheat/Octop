@@ -5,3 +5,17 @@ declare module "*.less" {
   const classes: { [key: string]: string };
   export default classes;
 }
+
+declare global {
+  interface Window {
+    /**
+     * Set by the Octop desktop shell (Wails) on every navigation. The thin
+     * build loads the Dashboard from the server, so this marker is the only
+     * reliable way for the page to know it is not a browser — and therefore
+     * must not register a Service Worker that would cache a stale frontend.
+     */
+    octopDesktopShell?: boolean;
+  }
+}
+
+export {};

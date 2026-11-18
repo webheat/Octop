@@ -50,6 +50,31 @@ async function unregisterAllServiceWorkers(): Promise<void> {
 }
 
 /**
+ * Drop a Service Worker (and its caches) that a previous desktop build left
+ * behind in the WebView2 profile.
+ *
+ * The thin shell used to load the remote Dashboard without telling the page it
+ * was inside the desktop client, so the page registered the production worker.
+ * That worker cached the remote chunks and kept serving a stale frontend after
+ * the server deployed a new build. The desktop client must always run the
+ * freshly deployed Dashboard, so the leftover worker has to go.
+ *
+ * Exported for the desktop branch in `main.tsx` and unit-tested there.
+ */
+export async function purgeStaleServiceWorker(): Promise<boolean> {
+  if (!("serviceWorker" in navigator)) return false;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    if (regs.length === 0) return false;
+    await unregisterAllServiceWorkers();
+    return true;
+  } catch (err) {
+    console.warn("[SW] Stale worker purge failed:", err);
+    return false;
+  }
+}
+
+/**
  * Apply a waiting Service Worker update and reload once.
  * Only called from explicit UI actions (PwaUpdatePrompt).
  */

@@ -79,8 +79,31 @@ void initI18n()
 // Register SW as early as possible so beforeinstallprompt can fire before the
 // user clicks the header install button (deferring to "load" caused a race).
 // DEV clears stale production workers, then registers the notification worker.
-// The desktop shell serves its own packaged Dashboard and must never register a
-// Service Worker that could cache a stale frontend independently of the shell.
-if (typeof window !== "undefined" && !window.octopDesktop) {
+// The desktop shell must never register a Service Worker that could cache a
+// stale frontend independently of the shell.
+//
+// `window.octopDesktop` is the Electron-style bridge and is absent in the thin
+// (remote) Wails build, so the shell also sets `window.octopDesktopShell`.
+// Without that marker the remote page believed it was a browser, registered
+// the production worker, and the WebView2 profile kept serving a stale
+// Dashboard long after the server deployed a new build.
+if (typeof window !== "undefined" && !window.octopDesktop && !window.octopDesktopShell) {
   void import("./sw-register").then(({ registerSW }) => registerSW());
+}
+
+// The desktop shell serves the Dashboard from the server, so a leftover
+// Service Worker can only ever pin the client to an outdated build. Drop it
+// (and its caches) before the app renders the stale page.
+//
+// The shell injects `window.octopDesktopShell` and performs the same purge on
+// its side, then reloads the document that the stale worker had rendered. The
+// page only has to make sure no worker survives — reloading here as well
+// would race the shell's reload.
+if (typeof window !== "undefined" && window.octopDesktopShell) {
+  void import("./sw-register").then(async ({ purgeStaleServiceWorker }) => {
+    const purged = await purgeStaleServiceWorker();
+    if (purged) {
+      console.info("[SW] Removed a stale Service Worker left by an older desktop build.");
+    }
+  });
 }

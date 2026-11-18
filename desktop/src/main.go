@@ -416,6 +416,24 @@ func (a *App) installDragOverlay() {
 	a.window.ExecJS(fileDropJS())
 	a.installVideoBridge()
 	a.installMinimalMode()
+	a.installDesktopFrontendMarker()
+}
+
+// installDesktopFrontendMarker tells the page it is running inside the desktop
+// shell and removes a Service Worker an older build may have left behind.
+//
+// The thin build loads the Dashboard from the server, so without this marker
+// the page believed it was a browser and registered the production Service
+// Worker. That worker cached the remote chunks in the WebView2 profile and
+// kept serving a stale frontend after the server deployed a new build.
+//
+// The injection runs on every navigation because the page reloads replace the
+// JavaScript context — the marker has to be re-applied each time.
+func (a *App) installDesktopFrontendMarker() {
+	if a.window == nil {
+		return
+	}
+	a.window.ExecJS(desktopFrontendMarkerJS())
 }
 
 // installMinimalMode hides the navigation rail for customer-facing shells.
