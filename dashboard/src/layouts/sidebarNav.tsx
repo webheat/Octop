@@ -2,21 +2,21 @@ import type { ReactNode } from "react";
 import {
   Monitor,
   MessageSquareText,
-  Timer,
+  // Timer,          // hidden: 自动化入口（见 buildNavSections）
   SlidersHorizontal,
   Waypoints,
   Link2,
   Database,
   Cpu,
   Users as UsersIcon,
-  Activity,
+  // Activity,       // hidden: Token 统计入口（见 buildNavSections）
   Share2,
   Cloudy,
   Sparkles,
   Puzzle,
   Package,
   HardDrive,
-  GraduationCap,
+  // GraduationCap,  // hidden: 专家入口（见 buildNavSections）
   Shield,
   PanelsTopLeft,
   Wrench,
@@ -200,30 +200,32 @@ export function buildNavSections(
       labelKey: "nav.productLibrary",
     },
   ];
-  if (navAllowed(user, "experts")) {
-    topItems.push({
-      key: "experts",
-      path: "/experts",
-      icon: <GraduationCap size={iconSize} strokeWidth={iconStroke} />,
-      labelKey: "nav.experts",
-    });
-  }
-  if (navAllowed(user, "tasks")) {
-    topItems.push({
-      key: "tasks",
-      path: "/tasks",
-      icon: <Timer size={iconSize} strokeWidth={iconStroke} />,
-      labelKey: "nav.tasks",
-    });
-  }
-  if (navAllowed(user, "token-usage")) {
-    topItems.push({
-      key: "token-usage",
-      path: "/token-usage",
-      icon: <Activity size={iconSize} strokeWidth={iconStroke} />,
-      labelKey: "nav.tokenUsage",
-    });
-  }
+  // 产品要求隐藏以下三个入口（专家 / 自动化 / Token 统计）。
+  // 需要恢复时取消下面三段的注释，并恢复顶部对应的三个 icon import 即可。
+  // if (navAllowed(user, "experts")) {
+  //   topItems.push({
+  //     key: "experts",
+  //     path: "/experts",
+  //     icon: <GraduationCap size={iconSize} strokeWidth={iconStroke} />,
+  //     labelKey: "nav.experts",
+  //   });
+  // }
+  // if (navAllowed(user, "tasks")) {
+  //   topItems.push({
+  //     key: "tasks",
+  //     path: "/tasks",
+  //     icon: <Timer size={iconSize} strokeWidth={iconStroke} />,
+  //     labelKey: "nav.tasks",
+  //   });
+  // }
+  // if (navAllowed(user, "token-usage")) {
+  //   topItems.push({
+  //     key: "token-usage",
+  //     path: "/token-usage",
+  //     icon: <Activity size={iconSize} strokeWidth={iconStroke} />,
+  //     labelKey: "nav.tokenUsage",
+  //   });
+  // }
   const sections: NavSection[] = [{ items: topItems }];
 
   const settingsItems: NavItem[] = [];

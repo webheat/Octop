@@ -34,13 +34,8 @@ describe("sidebarNavLayout", () => {
     const sections = catalog();
     expect(sectionsFromLayout(sections, null)).toBe(sections);
     const editor = editorFromCatalog(sections, null);
-    expect(editor.ungrouped).toEqual([
-      "chat",
-      "product-library",
-      "experts",
-      "tasks",
-      "token-usage",
-    ]);
+    // 专家 / 自动化 / Token 统计 已按产品要求从导航中移除
+    expect(editor.ungrouped).toEqual(["chat", "product-library"]);
     expect(editor.groups.map((group) => group.id)).toEqual([
       "settings",
       "control",
@@ -83,7 +78,7 @@ describe("sidebarNavLayout", () => {
       items: [{ key: "chat" }],
     });
     expect(editor.ungrouped).toEqual(["chat"]);
-    expect(editor.hidden).toContain("experts");
+    expect(editor.hidden).toContain("product-library");
     expect(editor.hidden).toContain("personalization");
     expect(
       sectionsFromLayout(catalog(), {
