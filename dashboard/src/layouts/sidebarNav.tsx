@@ -21,6 +21,7 @@ import {
   PanelsTopLeft,
   Wrench,
   FileVideo,
+  Clapperboard,
 } from "lucide-react";
 import type { OctopUser } from "../api/modules/auth";
 import { isPaidTierUser, navAllowed, userCan } from "../utils/permissions";
@@ -84,6 +85,7 @@ export const SIDEBAR_NAV_KEYS = [
   "workbench",
   "remote-desktop",
   "acp",
+  "video-wizard",
   "video-environment",
   "video-analysis",
   "admin-users",
@@ -94,12 +96,18 @@ export const SIDEBAR_NAV_KEYS = [
   "admin-advanced",
 ] as const;
 
-export const BUILTIN_NAV_GROUP_IDS = ["settings", "control", "admin"] as const;
+export const BUILTIN_NAV_GROUP_IDS = [
+  "video",
+  "settings",
+  "control",
+  "admin",
+] as const;
 
 const BUILTIN_NAV_GROUP_LABEL_KEYS: Record<
   (typeof BUILTIN_NAV_GROUP_IDS)[number],
   string
 > = {
+  video: "nav.video",
   settings: "nav.settings",
   control: "nav.control",
   admin: "nav.admin",
@@ -140,6 +148,7 @@ export const SIDEBAR_GROUPED_NAV_KEYS = [
   "workbench",
   "remote-desktop",
   "acp",
+  "video-wizard",
   "video-environment",
   "video-analysis",
   "admin-users",
@@ -228,6 +237,33 @@ export function buildNavSections(
   // }
   const sections: NavSection[] = [{ items: topItems }];
 
+  // Video tooling is visible to everyone; the paid analysis entry is dimmed
+  // for account types without the paid-tier entitlement.
+  const videoItems: NavItem[] = [
+    {
+      key: "video-wizard",
+      path: "/product-library/video-wizard",
+      icon: <Clapperboard size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.videoProduction",
+    },
+    {
+      key: "video-environment",
+      path: "/video-environment",
+      icon: <Wrench size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.videoEnvironment",
+    },
+    {
+      key: "video-analysis",
+      path: "/video-analysis",
+      icon: <FileVideo size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.videoAnalysis",
+      badge: "PRO",
+      disabled: !isPaidTierUser(user),
+      disabledReasonKey: "nav.videoAnalysisLockedHint",
+    },
+  ];
+  sections.push({ id: "video", groupKey: "nav.video", items: videoItems });
+
   const settingsItems: NavItem[] = [];
   if (navAllowed(user, "personalization")) {
     settingsItems.push({
@@ -286,23 +322,6 @@ export function buildNavSections(
   }
 
   const controlItems: NavItem[] = [];
-  // Video tooling is visible to everyone; the paid analysis entry is dimmed
-  // for account types without the paid-tier entitlement.
-  controlItems.push({
-    key: "video-environment",
-    path: "/video-environment",
-    icon: <Wrench size={iconSize} strokeWidth={iconStroke} />,
-    labelKey: "nav.videoEnvironment",
-  });
-  controlItems.push({
-    key: "video-analysis",
-    path: "/video-analysis",
-    icon: <FileVideo size={iconSize} strokeWidth={iconStroke} />,
-    labelKey: "nav.videoAnalysis",
-    badge: "PRO",
-    disabled: !isPaidTierUser(user),
-    disabledReasonKey: "nav.videoAnalysisLockedHint",
-  });
   if (navAllowed(user, "workbench")) {
     controlItems.push({
       key: "workbench",

@@ -29,9 +29,9 @@ export default function VideoEnvironmentPage() {
   const {
     environmentSupported,
     environmentStatus,
-    environmentInstallerURL,
     checkEnvironment,
     verifyEnvironment,
+    installEnvironment,
   } = useDesktopVideoJobs();
   const [busy, setBusy] = useState(false);
 
@@ -40,10 +40,16 @@ export default function VideoEnvironmentPage() {
     void checkEnvironment().catch(() => undefined);
   }, [checkEnvironment, environmentStatus.state, environmentSupported]);
 
-  const installerURL =
-    environmentInstallerURL && /^https?:\/\//i.test(environmentInstallerURL)
-      ? environmentInstallerURL
-      : undefined;
+  const install = useCallback(async () => {
+    setBusy(true);
+    try {
+      await installEnvironment();
+    } catch {
+      // The provider keeps the localized error code in its status snapshot.
+    } finally {
+      setBusy(false);
+    }
+  }, [installEnvironment]);
 
   const recheck = useCallback(async () => {
     setBusy(true);
@@ -69,12 +75,18 @@ export default function VideoEnvironmentPage() {
 
   const { state, stage, progress, errorCode, requiresInstall } =
     environmentStatus;
+  const installing = environmentSupported && state === "installing";
+  // A failed install also carries requiresInstall=true. Split it out so the
+  // concrete error (DOWNLOAD_FAILED / PACKAGE_INVALID / ENV_DISK_FULL / …)
+  // stays visible and the retry action installs again rather than verifies.
+  const installFailed =
+    environmentSupported && state === "failed" && requiresInstall === true;
   const needsInstall =
     !environmentSupported ||
-    state === "needs_setup" ||
-    requiresInstall === true ||
-    errorCode === "RUNTIME_MISSING" ||
-    errorCode === "BROWSER_MISSING";
+    (state === "needs_setup" ||
+      (!installing && !installFailed && requiresInstall === true) ||
+      errorCode === "RUNTIME_MISSING" ||
+      errorCode === "BROWSER_MISSING");
   const checking =
     environmentSupported &&
     (state === "checking" || state === "verifying" || state === "unknown");
@@ -103,28 +115,79 @@ export default function VideoEnvironmentPage() {
         </h4>
         <ol style={listStyle}>
           <li>{t("videoEnvironment.installStepDownload")}</li>
-          <li>{t("videoEnvironment.installStepRun")}</li>
+          <li>{t("videoEnvironment.installStepInstall")}</li>
           <li>{t("videoEnvironment.installStepRecheck")}</li>
         </ol>
         <Space wrap style={{ marginTop: 20 }}>
           <Button
             type="primary"
             icon={<Download size={15} />}
-            href={installerURL}
-            target="_blank"
-            rel="noreferrer"
-            disabled={!installerURL}
+            loading={busy}
+            disabled={!environmentSupported || busy}
+            onClick={() => void install()}
           >
             {t("videoEnvironment.installNow")}
           </Button>
         </Space>
-        {!installerURL && (
+        {!environmentSupported && (
           <div style={{ marginTop: 10 }}>
             <Text type="secondary">
               {t("videoEnvironment.installerUnavailable")}
             </Text>
           </div>
         )}
+      </>
+    );
+  } else if (state === "installing") {
+    statusBody = (
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Space align="start">
+          <Spin />
+          <div>
+            <strong>{t("videoEnvironment.installing")}</strong>
+            {stage && (
+              <div style={{ marginTop: 4 }}>
+                <Text type="secondary">
+                  {t(`videoWizard.environment.stages.${stage}`)}
+                </Text>
+              </div>
+            )}
+          </div>
+        </Space>
+        {progress !== null ? (
+          <Progress
+            percent={Math.round(Math.max(0, Math.min(1, progress)) * 100)}
+            status="active"
+          />
+        ) : (
+          <Progress percent={99} status="active" showInfo={false} />
+        )}
+        <Text type="secondary">{t("videoEnvironment.installingHint")}</Text>
+      </Space>
+    );
+  } else if (installFailed) {
+    statusBody = (
+      <>
+        <Alert
+          type="error"
+          showIcon
+          message={t("videoEnvironment.installFailedTitle")}
+          description={
+            errorCode
+              ? t(`videoWizard.desktopErrors.${errorCode}`)
+              : t("videoEnvironment.installFailedHint")
+          }
+        />
+        <Space wrap style={{ marginTop: 20 }}>
+          <Button
+            type="primary"
+            loading={busy}
+            disabled={busy}
+            onClick={() => void install()}
+          >
+            {t("videoEnvironment.retryInstall")}
+          </Button>
+        </Space>
       </>
     );
   } else if (ready) {

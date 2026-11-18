@@ -87,6 +87,12 @@ type Options struct {
 	// Backoff is the pause between two attempts on the same mirror; an empty
 	// slice means DefaultBackoff.
 	Backoff []time.Duration
+	// Merge allows one root part to coexist with parts targeting subpaths of
+	// the same root. In merge mode parts are installed in manifest order and
+	// the root part must come first: its Extract wipes Root, so any part that
+	// follows must live under a distinct Target. This is how the video runtime
+	// installs a core part plus an optional headless-shell subtree.
+	Merge bool
 }
 
 const (
@@ -110,7 +116,7 @@ func Run(opts Options) error {
 	if len(opts.Manifest.Parts) == 0 {
 		return errors.New("bootstrap: the manifest lists no parts")
 	}
-	if err := validateParts(opts.Manifest.Parts); err != nil {
+	if err := validateParts(opts.Manifest.Parts, opts.Merge); err != nil {
 		return err
 	}
 	if opts.CacheDir == "" {
@@ -162,9 +168,9 @@ func Run(opts Options) error {
 }
 
 // validateParts rejects manifests the installer cannot act on.
-func validateParts(parts []Part) error {
+func validateParts(parts []Part, merge bool) error {
 	roots := 0
-	for _, part := range parts {
+	for i, part := range parts {
 		if part.ID == "" {
 			return errors.New("bootstrap: a part has no id")
 		}
@@ -173,14 +179,18 @@ func validateParts(parts []Part) error {
 		}
 		if part.Target == "" {
 			roots++
+			if merge && i != 0 {
+				return errors.New("bootstrap: in merge mode the root part must come first")
+			}
 		}
 	}
 	if roots > 1 {
 		return errors.New("bootstrap: more than one part targets the runtime root")
 	}
-	if roots == 1 && len(parts) > 1 {
+	if !merge && roots == 1 && len(parts) > 1 {
 		// The root part owns everything below it — another part would be
-		// wiped out by it.
+		// wiped out by it. In merge mode this is allowed because the root
+		// part is required to come first and later parts use distinct Targets.
 		return errors.New("bootstrap: a part targeting the runtime root cannot be combined with other parts")
 	}
 	return nil

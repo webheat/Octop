@@ -362,7 +362,9 @@
     "passkeys": "Passkeys",
     "videoEnvironment": "Video environment check",
     "videoAnalysis": "Analyze target video",
-    "videoAnalysisLockedHint": "Paid feature - not available for your current account type. Upgrade to unlock."
+    "videoAnalysisLockedHint": "Paid feature - not available for your current account type. Upgrade to unlock.",
+    "video": "Video",
+    "videoProduction": "Make video"
   },
   "videoEnvironment": {
     "title": "Video environment check",
@@ -376,17 +378,16 @@
     "readyTitle": "Video environment is ready",
     "readyHint": "You can now create a video plan and render it.",
     "installTitle": "Video production components are required",
-    "installHint": "No usable video runtime was found. Use the button below to get and install the components; the installer does not change your system PATH.",
+    "installHint": "No video runtime was found. Click the button below and Octop will download and install the components automatically — system PATH is never modified.",
     "verifyTitle": "Components installed, verification pending",
     "verifyHint": "Run a short environment check to confirm everything works.",
     "failedTitle": "Environment verification failed",
     "failedHint": "Reinstall the components and try again, or contact your administrator.",
-    "installNow": "Install components now",
-    "installerUnavailable": "This client has no installer URL. Open this page in the desktop app or contact your administrator.",
+    "installNow": "Install components",
+    "installerUnavailable": "Open this page in the desktop client to install, or contact your administrator.",
     "installStepsTitle": "Installation steps",
-    "installStepDownload": "Download the standalone video component installer",
-    "installStepRun": "Run the installer and follow the prompts",
-    "installStepRecheck": "Return to this page and click Recheck",
+    "installStepDownload": "Click the button below; Octop downloads the components from the official CDN",
+    "installStepRecheck": "The environment is checked automatically, or click Re-check",
     "recheck": "Recheck",
     "backToLibrary": "Back to products",
     "verify": "Verify environment",
@@ -399,7 +400,13 @@
       "components": "Checking components",
       "browser": "Checking browser",
       "render_test": "Verifying video rendering"
-    }
+    },
+    "installStepInstall": "Installation and verification run automatically — no manual steps",
+    "installing": "Installing video components…",
+    "installingHint": "The first download takes a few minutes. Keep the client open. Components install next to the client and never modify system PATH.",
+    "installFailedTitle": "Component installation failed",
+    "installFailedHint": "Check your network and disk space, then try again or contact your administrator.",
+    "retryInstall": "Retry install"
   },
   "videoAnalysis": {
     "title": "Analyze target video",
@@ -695,10 +702,9 @@
       "checking": "Checking the video environment…",
       "verifying": "Verifying the video environment…",
       "installTitle": "Video creation components are required",
-      "installHint": "This lightweight client needs the separate Octop video components installed. The installer prepares what is needed for video generation without changing the system PATH.",
-      "installStepDownload": "Get the standalone Octop video components installer",
-      "installStepRun": "Run the installer and follow its instructions",
-      "installStepRecheck": "Return to Octop and check again",
+      "installHint": "This lightweight client needs the video components. Click below to download and install automatically — system PATH is never modified.",
+      "installStepDownload": "Click the button below; Octop downloads the components from the official CDN",
+      "installStepRecheck": "The environment is checked automatically, or click Re-check",
       "downloadComponents": "Download video components",
       "contactAdmin": "Ask your administrator for the video components installer.",
       "verifyTitle": "Video components are installed but not verified",
@@ -713,7 +719,9 @@
         "components": "Checking video components",
         "browser": "Checking browser",
         "render_test": "Verifying video creation"
-      }
+      },
+      "installStepInstall": "Installation and verification run automatically — no manual steps",
+      "installing": "Installing video components…"
     },
     "desktopErrors": {
       "AUTH_REQUIRED": "Your session expired. Sign in again and retry.",
@@ -721,8 +729,8 @@
       "PLAN_NOT_CONFIRMED": "Save and confirm the current plan first.",
       "PLAN_CHANGED": "The plan changed. Confirm it again before rendering.",
       "BUSY": "Another video is already being generated. Try again later.",
-      "DOWNLOAD_FAILED": "Could not download the project assets. Check your connection and retry.",
-      "PACKAGE_INVALID": "The project package could not be verified. Regenerate the plan and retry.",
+      "DOWNLOAD_FAILED": "Download failed. Check your connection and retry.",
+      "PACKAGE_INVALID": "Component verification failed. Please reinstall and retry.",
       "RUNTIME_UNAVAILABLE": "The video generation component is not ready. Restart Octop and retry.",
       "RUNTIME_MISSING": "Video components were not found. Install them as described, then check again.",
       "BROWSER_MISSING": "The browser bundled with the video components is unavailable. Reinstall the components, then check again.",
@@ -733,7 +741,8 @@
       "RENDER_FAILED": "Video creation failed. Please retry.",
       "SAVE_FAILED": "Could not save the video. Please retry.",
       "CANCELLED": "Video creation was cancelled.",
-      "INTERNAL": "Video generation encountered a problem. Please retry."
+      "INTERNAL": "Video generation encountered a problem. Please retry.",
+      "NO_INSTALLER": "This client has no component download URL configured. Open this page in the desktop client or contact your administrator."
     },
     "previous": "Previous",
     "next": "Next",
@@ -963,7 +972,7 @@
     "editDocumentSuccess": "Saved; reindex started",
     "editDocumentFailed": "Failed to save document",
     "filenameRequired": "Please enter a file name",
-    "filenamePlaceholder": "e.g. notes",
+    "filenamePlaceholder": "File name",
     "fileFormat": "Format",
     "fileContent": "Content",
     "fileContentPlaceholder": "Write document content here…",
@@ -984,7 +993,6 @@
     "moveSuccess": "Moved",
     "moveSuccessTo": "Moved to “{{name}}”",
     "moveFailed": "Failed to move",
-    "filenamePlaceholder": "File name",
     "pathBreadcrumb": "Path",
     "deleteFolderConfirm": "Delete this folder and everything inside it?",
     "uploaded": "Documents uploaded",

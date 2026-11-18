@@ -49,6 +49,7 @@ export interface DesktopVideoBridge {
       | "save"
       | "environment_check"
       | "environment_verify"
+      | "environment_install"
       | "environment_status",
     payload: Record<string, unknown>,
   ) => Promise<T>;
@@ -57,6 +58,7 @@ export interface DesktopVideoBridge {
 export type DesktopVideoEnvironmentState =
   | "unknown"
   | "checking"
+  | "installing"
   | "needs_setup"
   | "verifying"
   | "ready"
@@ -99,6 +101,7 @@ interface DesktopVideoJobsContextValue {
   save: (jobId: string) => Promise<boolean>;
   checkEnvironment: (force?: boolean) => Promise<DesktopVideoEnvironmentStatus>;
   verifyEnvironment: () => Promise<DesktopVideoEnvironmentStatus>;
+  installEnvironment: () => Promise<DesktopVideoEnvironmentStatus>;
   refreshEnvironment: () => Promise<DesktopVideoEnvironmentStatus>;
   refresh: () => Promise<void>;
 }
@@ -119,6 +122,7 @@ const DesktopVideoJobsContext = createContext<DesktopVideoJobsContextValue>({
   save: missingBridge,
   checkEnvironment: missingBridge,
   verifyEnvironment: missingBridge,
+  installEnvironment: missingBridge,
   refreshEnvironment: missingBridge,
   refresh: async () => undefined,
 });
@@ -194,6 +198,7 @@ export function DesktopVideoJobsProvider({
         | "save"
         | "environment_check"
         | "environment_verify"
+        | "environment_install"
         | "environment_status",
       payload: Record<string, unknown> = {},
     ): Promise<T> => {
@@ -286,7 +291,11 @@ export function DesktopVideoJobsProvider({
 
   const readEnvironmentAction = useCallback(
     async (
-      action: "environment_check" | "environment_verify" | "environment_status",
+      action:
+        | "environment_check"
+        | "environment_verify"
+        | "environment_install"
+        | "environment_status",
     ) => {
       if (!environmentSupported) {
         throw new DesktopVideoBridgeError("RUNTIME_UNAVAILABLE");
@@ -355,6 +364,28 @@ export function DesktopVideoJobsProvider({
     }
   }, [readEnvironmentAction, userId]);
 
+  const installEnvironment = useCallback(async () => {
+    if (!userId) throw new DesktopVideoBridgeError("AUTH_REQUIRED");
+    try {
+      return await readEnvironmentAction("environment_install");
+    } catch (error) {
+      if (userId && ownerRef.current === userId) {
+        const failed: DesktopVideoEnvironmentStatus = {
+          state: "failed",
+          stage: null,
+          progress: null,
+          errorCode: nativeErrorCode(error),
+          requiresInstall: true,
+        };
+        environmentOwnerRef.current = userId;
+        environmentRef.current = failed;
+        setEnvironmentOwnerId(userId);
+        setEnvironmentStatus(failed);
+      }
+      throw error;
+    }
+  }, [readEnvironmentAction, userId]);
+
   const refreshEnvironment = useCallback(
     () => readEnvironmentAction("environment_status"),
     [readEnvironmentAction],
@@ -371,7 +402,7 @@ export function DesktopVideoJobsProvider({
   useEffect(() => {
     if (
       environmentOwnerId !== userId ||
-      !["checking", "verifying"].includes(environmentStatus.state)
+      !["checking", "installing", "verifying"].includes(environmentStatus.state)
     ) {
       return;
     }
@@ -398,6 +429,7 @@ export function DesktopVideoJobsProvider({
       save,
       checkEnvironment,
       verifyEnvironment,
+      installEnvironment,
       refreshEnvironment,
       refresh,
     }),
@@ -416,6 +448,7 @@ export function DesktopVideoJobsProvider({
       save,
       checkEnvironment,
       verifyEnvironment,
+      installEnvironment,
       refreshEnvironment,
       refresh,
     ],

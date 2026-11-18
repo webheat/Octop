@@ -37,6 +37,7 @@ describe("sidebarNavLayout", () => {
     // 专家 / 自动化 / Token 统计 已按产品要求从导航中移除
     expect(editor.ungrouped).toEqual(["chat", "product-library"]);
     expect(editor.groups.map((group) => group.id)).toEqual([
+      "video",
       "settings",
       "control",
       "admin",
@@ -93,7 +94,11 @@ describe("sidebarNavLayout", () => {
   it("moves a deleted group's items to the front of the ungrouped list", () => {
     const editor = editorFromCatalog(catalog(), null);
     const next = deleteGroup(editor, "settings");
-    expect(next.groups.map((group) => group.id)).toEqual(["control", "admin"]);
+    expect(next.groups.map((group) => group.id)).toEqual([
+      "video",
+      "control",
+      "admin",
+    ]);
     expect(next.ungrouped.slice(0, 2)).toEqual(["personalization", "channels"]);
     expect(next.ungrouped).toContain("chat");
   });
@@ -135,9 +140,16 @@ describe("sidebarNavLayout", () => {
     expect(shown).not.toContain("channels");
     expect(shown).toContain("chat");
     expect(shown).not.toContain("personalization");
+    // limitedUser 看不到任何设置项 → 内置 settings / admin 分组按设计被隐藏。
     expect(
       visibleEditorGroups(editor, sections).map((group) => group.id),
-    ).toEqual(["settings", "c_aabbccdd"]);
+    ).toEqual(["c_aabbccdd"]);
+    // 能看到设置项的内置分组则保留。
+    const adminSections = buildNavSections(adminUser, { mobileEnabled: true });
+    const adminEditor = editorFromCatalog(adminSections, null);
+    expect(
+      visibleEditorGroups(adminEditor, adminSections).map((group) => group.id),
+    ).toContain("settings");
   });
 
   it("keeps a new empty group only in the editor", () => {

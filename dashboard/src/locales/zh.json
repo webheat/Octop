@@ -362,7 +362,9 @@
     "passkeys": "通行密钥",
     "videoEnvironment": "视频生成环境检测",
     "videoAnalysis": "分析目标视频",
-    "videoAnalysisLockedHint": "付费功能 · 当前账号类型不可用，升级后解锁"
+    "videoAnalysisLockedHint": "付费功能 · 当前账号类型不可用，升级后解锁",
+    "video": "视频",
+    "videoProduction": "视频制作"
   },
   "videoEnvironment": {
     "title": "视频生成环境检测",
@@ -376,17 +378,16 @@
     "readyTitle": "视频生成环境已就绪",
     "readyHint": "现在可以创建视频方案并生成视频。",
     "installTitle": "需要安装视频制作组件",
-    "installHint": "未找到可用的视频生成运行时。点击下方按钮获取并安装组件，安装程序不会修改系统 PATH。",
+    "installHint": "未找到可用的视频生成运行时。点击下方按钮，Octop 会自动下载并安装组件，不会修改系统 PATH。",
     "verifyTitle": "组件已安装，尚未验证",
     "verifyHint": "点击验证，Octop 会运行一次短暂的制作环境检查。",
     "failedTitle": "环境验证失败",
     "failedHint": "请重新安装组件后重试，或联系管理员。",
     "installNow": "一键安装制作组件",
-    "installerUnavailable": "当前客户端未提供安装包地址，请在桌面客户端打开本页或联系管理员。",
+    "installerUnavailable": "请在桌面客户端打开本页以安装组件，或联系管理员。",
     "installStepsTitle": "安装步骤",
-    "installStepDownload": "下载独立的视频制作组件安装包",
-    "installStepRun": "运行安装程序，按提示完成安装",
-    "installStepRecheck": "回到本页点击「重新检测」",
+    "installStepDownload": "点击下方按钮，Octop 从官方 CDN 下载组件",
+    "installStepRecheck": "安装完成后自动检测，或手动点击「重新检测」",
     "recheck": "重新检测",
     "backToLibrary": "返回商品库",
     "verify": "验证制作环境",
@@ -399,7 +400,13 @@
       "components": "检查制作组件",
       "browser": "检查浏览器",
       "render_test": "验证视频制作"
-    }
+    },
+    "installStepInstall": "自动完成安装与校验，无需手动操作",
+    "installing": "正在安装视频制作组件…",
+    "installingHint": "首次下载约需几分钟，请保持客户端打开。组件安装在客户端所在目录，不会修改系统 PATH。",
+    "installFailedTitle": "组件安装失败",
+    "installFailedHint": "请检查网络与磁盘空间后重试，或联系管理员。",
+    "retryInstall": "重试安装"
   },
   "videoAnalysis": {
     "title": "分析目标视频",
@@ -695,10 +702,9 @@
       "checking": "正在检查视频制作环境…",
       "verifying": "正在验证制作环境…",
       "installTitle": "需要安装视频制作组件",
-      "installHint": "此轻量版客户端需要单独安装视频制作组件。安装程序会准备视频生成所需内容，不会修改系统 PATH。",
-      "installStepDownload": "获取独立的 Octop 视频制作组件安装包",
-      "installStepRun": "运行安装程序，按提示完成安装",
-      "installStepRecheck": "回到 Octop，点击重新检测",
+      "installHint": "此轻量版客户端需要单独安装视频制作组件，点击下方按钮自动下载安装，不会修改系统 PATH。",
+      "installStepDownload": "点击下方按钮，Octop 从官方 CDN 下载组件",
+      "installStepRecheck": "安装完成后自动检测，或点击「重新检测」",
       "downloadComponents": "下载制作组件安装包",
       "contactAdmin": "请联系管理员获取视频制作组件安装包。",
       "verifyTitle": "视频制作组件已安装，尚未验证",
@@ -713,7 +719,9 @@
         "components": "检查制作组件",
         "browser": "检查浏览器",
         "render_test": "验证视频制作"
-      }
+      },
+      "installStepInstall": "自动完成安装与校验，无需手动操作",
+      "installing": "正在安装视频制作组件…"
     },
     "desktopErrors": {
       "AUTH_REQUIRED": "登录状态已失效，请重新登录后重试。",
@@ -721,8 +729,8 @@
       "PLAN_NOT_CONFIRMED": "请先保存并确认当前方案。",
       "PLAN_CHANGED": "方案已变更，请重新确认后再制作。",
       "BUSY": "已有另一个生成任务正在运行，请稍后重试。",
-      "DOWNLOAD_FAILED": "无法获取制作素材，请检查网络后重试。",
-      "PACKAGE_INVALID": "制作包校验失败，请重新生成方案后重试。",
+      "DOWNLOAD_FAILED": "下载失败，请检查网络后重试。",
+      "PACKAGE_INVALID": "组件校验失败，请重新安装后重试。",
       "RUNTIME_UNAVAILABLE": "视频生成组件尚未就绪，请重启 Octop 后重试。",
       "RUNTIME_MISSING": "没有找到视频制作组件，请按说明安装后重新检测。",
       "BROWSER_MISSING": "制作组件中的浏览器不可用，请重新安装组件后重新检测。",
@@ -733,7 +741,8 @@
       "RENDER_FAILED": "视频制作失败，请重试。",
       "SAVE_FAILED": "保存视频失败，请重试。",
       "CANCELLED": "制作已取消。",
-      "INTERNAL": "生成遇到问题，请重试。"
+      "INTERNAL": "生成遇到问题，请重试。",
+      "NO_INSTALLER": "当前客户端未配置组件下载地址，请在桌面客户端打开本页或联系管理员。"
     },
     "previous": "上一步",
     "next": "下一步",
@@ -963,7 +972,7 @@
     "editDocumentSuccess": "已保存，正在重建索引",
     "editDocumentFailed": "保存文档失败",
     "filenameRequired": "请输入文件名",
-    "filenamePlaceholder": "例如 notes",
+    "filenamePlaceholder": "文件名",
     "fileFormat": "格式",
     "fileContent": "内容",
     "fileContentPlaceholder": "在此编写文档内容…",
@@ -984,7 +993,6 @@
     "moveSuccess": "已移动",
     "moveSuccessTo": "已移动到「{{name}}」",
     "moveFailed": "移动失败",
-    "filenamePlaceholder": "文件名",
     "pathBreadcrumb": "路径导航",
     "deleteFolderConfirm": "删除此文件夹及其内部文档？",
     "uploaded": "文档已上传",

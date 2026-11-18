@@ -455,3 +455,77 @@ func writeTestTarGz(t *testing.T, path string, entries map[string]string) {
 		t.Fatal(err)
 	}
 }
+
+func TestValidatePartsMergeMode(t *testing.T) {
+	core := Part{ID: "core", URLs: []string{"https://x/core.zip"}, Target: ""}
+	browser := Part{ID: "browser", URLs: []string{"https://x/browser.zip"}, Target: "node_modules/.remotion/chrome-headless-shell"}
+
+	if err := validateParts([]Part{core, browser}, false); err == nil {
+		t.Fatal("non-merge mode must reject a root part combined with another part")
+	}
+	if err := validateParts([]Part{core, browser}, true); err != nil {
+		t.Fatalf("merge mode must accept core+browser: %v", err)
+	}
+	if err := validateParts([]Part{browser, core}, true); err == nil {
+		t.Fatal("merge mode must reject a root part that is not first")
+	}
+}
+
+func TestRunMergeLayersPartsIntoOneRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "video-runtime")
+
+	coreZip := filepath.Join(t.TempDir(), "core.zip")
+	writeTestZipEntries(t, coreZip, map[string]string{"node.exe": "NODE", "desktop-worker.mjs": "WORKER", "runtime.json": "{}"})
+	browserZip := filepath.Join(t.TempDir(), "browser.zip")
+	writeTestZipEntries(t, browserZip, map[string]string{"win64/chrome.exe": "CHROME"})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/core.zip":
+			serveRange(mustRead(t, coreZip), w, r)
+		case "/browser.zip":
+			serveRange(mustRead(t, browserZip), w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	coreData := mustRead(t, coreZip)
+	browserData := mustRead(t, browserZip)
+	manifest := Manifest{
+		Version: "1.4.0-test",
+		Parts: []Part{
+			{ID: "core", URLs: []string{server.URL + "/core.zip"}, Size: int64(len(coreData)), SHA256: checksum(coreData), Format: "zip", Required: true},
+			{ID: "browser", URLs: []string{server.URL + "/browser.zip"}, Size: int64(len(browserData)), SHA256: checksum(browserData), Format: "zip", Target: "node_modules/.remotion/chrome-headless-shell", Required: true},
+		},
+	}
+	opts := testOptions(t, root, manifest)
+	opts.Merge = true
+	if err := Run(opts); err != nil {
+		t.Fatalf("merge run failed: %v", err)
+	}
+
+	for name, want := range map[string]string{
+		"node.exe":     "NODE",
+		"runtime.json": "{}",
+		"node_modules/.remotion/chrome-headless-shell/win64/chrome.exe": "CHROME",
+	} {
+		got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatalf("missing %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s: got %q, want %q", name, got, want)
+		}
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
