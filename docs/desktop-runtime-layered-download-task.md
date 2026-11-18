@@ -1,6 +1,8 @@
 # 任务书：桌面运行时「分层下载」改造（核心包 + 按需环境包）
 
-> 状态：**待实施**（用户 2026-11-18 决策：先验证 M1，本任务另起独立工作）
+> 状态：**PR-0 / PR-1 已实施并合入 `develop`**（2026-11-19）；PR-3 / PR-5 为设计 + 原型，
+> 仍待落地。交付报告见 `docs/desktop-runtime-layered-download-report-pr0.md` /
+> `-pr1.md` / `-pr35.md`，PR-3·PR-5 设计见 `docs/desktop-runtime-layered-download-pr3-pr5.md`。
 > 目标读者：接手的 LLM / 开发
 > 关联设计：`docs/desktop-bootstrap-installer.md`（**方案与路线图的权威文档，本文不重复设计，只固化可执行待办与代码证据**）
 > 触发背景：slim 客户端首启下载 246MB 全量 Python 运行时包（`Octop-portable-windows-amd64-1.4.0.zip`），用户希望改为「核心包 + 按需环境包」分层下载。
