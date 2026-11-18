@@ -169,12 +169,12 @@ function Test-Install {
     Write-Info "Install verification passed"
 }
 
-$ExtrasSuffix = "[browser]"
+$ExtrasSuffix = "[browser,tencentcloud]"
 if ($Extras) {
-    $parts = @("browser")
+    $parts = @("browser", "tencentcloud")
     foreach ($p in ($Extras -split ",")) {
         $t = $p.Trim()
-        if (-not $t -or $t -eq "browser" -or $t -eq "channels-feishu") { continue }
+        if (-not $t -or $t -eq "browser" -or $t -eq "tencentcloud" -or $t -eq "channels-feishu") { continue }
         $parts += $t
     }
     $ExtrasSuffix = "[" + ($parts -join ",") + "]"

@@ -248,8 +248,10 @@ jobs:
           SP="${{ github.workspace }}/fnos/native/app/site-packages"
           {
             python3 -m pip install --quiet uv
+            # playwright / tencentcloud-sdk-python 自运行时瘦身后不再是核心依赖，
+            # 但 fnOS 原生版仍要保有浏览器工具与云工作台，显式带上这两个 extra。
             python3 -m uv pip install --python python3.12 \
-              --target "$SP" --no-cache "$(ls dist/octop-*.whl | head -1)"
+              --target "$SP" --no-cache "$(ls dist/octop-*.whl | head -1)[browser,tencentcloud]"
             rm -rf "$SP/mcp" "$SP"/mcp-*.dist-info \
                    "$SP/langchain_mcp_adapters" "$SP"/langchain_mcp_adapters-*.dist-info
             mkdir -p /tmp/octop-pinned
@@ -372,9 +374,11 @@ jobs:
             python3.12 -c "import platform; print(platform.machine())"
             python3 -m pip install --quiet uv
             # esdk-obs-python is sdist-only; --only-binary :all: fails the resolver.
+            # playwright / tencentcloud-sdk-python 自运行时瘦身后不再是核心依赖，
+            # 但 fnOS 原生版仍要保有浏览器工具与云工作台，显式带上这两个 extra。
             python3 -m uv pip install --python python3.12 \
               --target "$SP" --no-cache \
-              "$(ls dist/octop-*.whl | head -1)"
+              "$(ls dist/octop-*.whl | head -1)[browser,tencentcloud]"
             rm -rf "$SP/mcp" "$SP"/mcp-*.dist-info \
                    "$SP/langchain_mcp_adapters" "$SP"/langchain_mcp_adapters-*.dist-info
             mkdir -p /tmp/octop-pinned

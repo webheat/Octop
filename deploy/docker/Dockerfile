@@ -138,10 +138,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
        esac \
     && apt-get update && apt-get install -y --no-install-recommends build-essential \
     && if [ "$OCTOP_IMAGE_VARIANT" = "lite" ]; then \
-         uv sync --frozen --no-install-project --no-dev --extra browser; \
+         uv sync --frozen --no-install-project --no-dev --extra browser --extra tencentcloud; \
        else \
          uv sync --frozen --no-install-project --no-dev \
-           --extra browser --extra desktop --extra local-embedding --extra knowledge-ocr; \
+           --extra browser --extra tencentcloud --extra desktop --extra local-embedding --extra knowledge-ocr; \
        fi \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -165,11 +165,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         if [ -n "$PIP_TRUSTED_HOST" ]; then export UV_INSECURE_HOST="$PIP_TRUSTED_HOST"; fi; \
     fi \
     && if [ "$OCTOP_IMAGE_VARIANT" = "lite" ]; then \
-         uv sync --frozen --no-dev --extra browser \
+         uv sync --frozen --no-dev --extra browser --extra tencentcloud \
          && .venv/bin/python -c "import octop"; \
        else \
          uv sync --frozen --no-dev \
-           --extra browser --extra desktop --extra local-embedding --extra knowledge-ocr \
+           --extra browser --extra tencentcloud --extra desktop --extra local-embedding --extra knowledge-ocr \
          && .venv/bin/python -c "import cv2, fastembed, huggingface_hub, mss, rapidocr, onnxruntime, pymupdf; import importlib.util; assert importlib.util.find_spec('pynput')" \
          && apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk; \
        fi \

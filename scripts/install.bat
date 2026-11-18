@@ -63,8 +63,8 @@ if not exist "%VENV_PYTHON%" (echo [octop] ERROR: venv python missing & exit /b 
 for /f "delims=" %%v in ('"%VENV_PYTHON%" --version 2^>^&1') do set "PY_VERSION=%%v"
 echo [octop] Python environment ready (%PY_VERSION%)
 
-set "EXTRAS_SUFFIX=[browser]"
-if defined ARG_EXTRAS set "EXTRAS_SUFFIX=[browser,%ARG_EXTRAS%]"
+set "EXTRAS_SUFFIX=[browser,tencentcloud]"
+if defined ARG_EXTRAS set "EXTRAS_SUFFIX=[browser,tencentcloud,%ARG_EXTRAS%]"
 set "VENV_OCTOP=%OCTOP_VENV%\Scripts\octop.exe"
 
 if "%ARG_FROM_SOURCE%"=="1" goto :install_from_source

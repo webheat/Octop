@@ -122,10 +122,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
        esac \
     && apt-get update && apt-get install -y --no-install-recommends build-essential \
     && if [ "$OCTOP_IMAGE_VARIANT" = "lite" ]; then \
-         uv pip install --python /app/.venv ".[browser]" \
+         uv pip install --python /app/.venv ".[browser,tencentcloud]" \
          && /app/.venv/bin/python -c "import octop"; \
        else \
-         uv pip install --python /app/.venv ".[desktop,local-embedding,knowledge-ocr]" \
+         uv pip install --python /app/.venv ".[browser,tencentcloud,desktop,local-embedding,knowledge-ocr]" \
          && /app/.venv/bin/python -c "import cv2, fastembed, huggingface_hub, mss, rapidocr, onnxruntime, pymupdf; import importlib.util; assert importlib.util.find_spec('pynput')"; \
        fi \
     && if [ "$OCTOP_IMAGE_VARIANT" != "lite" ]; then \
