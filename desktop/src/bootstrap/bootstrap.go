@@ -34,6 +34,12 @@ type Part struct {
 	Target string `json:"target,omitempty"`
 	// StripRoot drops the single top-level directory of the archive.
 	StripRoot bool `json:"stripRoot,omitempty"`
+	// Append unpacks the archive over an existing Target instead of replacing
+	// it. The first part that names a Target owns it (its extraction wipes the
+	// directory); later parts set Append so they add files without deleting
+	// what came before. This is how the portable runtime layers app and
+	// optional dependency shards into one packages/ tree.
+	Append bool `json:"append,omitempty"`
 	// Required parts must be installed before the runtime can start.
 	Required bool `json:"required"`
 }
@@ -284,6 +290,11 @@ func (f *fetcher) unpack(part Part, archive string) error {
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
+	}
+	if part.Append {
+		// Another part staged this Target before us; add to it instead of
+		// wiping the files that are already there.
+		return ExtractOver(archive, dest, part.Format, part.StripRoot)
 	}
 	return Extract(archive, dest, part.Format, part.StripRoot)
 }

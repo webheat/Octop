@@ -505,6 +505,60 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # PR-1: split the Windows portable zip into runtime shards + manifest.
+  # Artifact-only on purpose — the release job below does not depend on this
+  # job, and no installer references the manifest yet. It reuses the zip the
+  # package job already built instead of assembling the runtime a second time.
+  shards:
+    name: Runtime shards (artifact only, not published)
+    needs: [package]
+    if: >-
+      always() && !cancelled() &&
+      needs.package.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.attach_from_run == '')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Octop-portable-windows-*
+          path: shard-input
+          merge-multiple: true
+          skip-decompress: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Split the Windows runtime into shards
+        id: shards
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(shard-input/Octop-portable-windows-*.zip)
+          if (( ${#zips[@]} == 0 )); then
+            echo "No Windows portable zip in this run — skipping shard packaging."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          for zip in "${zips[@]}"; do
+            echo "== ${zip}"
+            python3 desktop/portable/pack_portable_shards.py \
+              --zip "$zip" \
+              --out-dir dist/runtime-shards
+          done
+          find dist/runtime-shards -maxdepth 3 -type f -print
+
+      - uses: actions/upload-artifact@v7
+        if: steps.shards.outputs.found == 'true'
+        with:
+          name: octop-runtime-shards-pr1
+          path: dist/runtime-shards/
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Attach packages to GitHub Release
     needs: package

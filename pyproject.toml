@@ -38,7 +38,6 @@ dependencies = [
     "josepy>=2.2.0",
     "boto3>=1.40.61",
     "octop-browser>=1.0.0",
-    "playwright>=1.40",
     "psycopg[binary]>=3.2",
     "langgraph-checkpoint-postgres>=2.0",
     "mcp>=1.9,<2",
@@ -51,7 +50,6 @@ dependencies = [
     "xlrd>=2.0.1",
     "ldap3>=2.9.1",
     "firecrawl-anydoc>=0.2.4",
-    "tencentcloud-sdk-python>=3.1.166",
     "pyotp>=2.10.0",
     "webauthn>=3.0.1",
 ]
@@ -70,11 +68,17 @@ dev = [
     "mypy>=1.10",
     "build>=1.0",
     "xlwt>=1.3",
+    # The cloud integration tests import the SDK directly; the runtime extra
+    # (`tencentcloud`) is not installed by plain `uv sync`.
+    "tencentcloud-sdk-python>=3.1.166",
 ]
-# Kept for backward compatibility; playwright is now a core dependency.
+# Remote-browser automation. Chromium itself is not bundled — the dashboard
+# downloads it on demand via POST /api/browser/install.
 browser = [
     "playwright>=1.40",
 ]
+# Tencent Cloud CVM inventory/monitoring for the Workbench cloud tab.
+tencentcloud = ["tencentcloud-sdk-python>=3.1.166"]
 # Volcengine TOS object storage (Admin storage kind ``tos``).
 tos = ["tos>=2.9,<3"]
 # Kept for backward compatibility; pillow is now a core dependency.
@@ -102,6 +106,9 @@ dev = [
     "mypy>=1.10",
     "build>=1.0",
     "xlwt>=1.3",
+    # The cloud integration tests import the SDK directly; the runtime extra
+    # (`tencentcloud`) is not installed by plain `uv sync`.
+    "tencentcloud-sdk-python>=3.1.166",
 ]
 
 [project.scripts]

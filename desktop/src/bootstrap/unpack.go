@@ -26,6 +26,23 @@ func Extract(archive, dest, format string, stripRoot bool) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
+	return extractInto(archive, dest, format, stripRoot)
+}
+
+// ExtractOver unpacks an archive into dest without clearing it first. It is
+// the append counterpart of Extract: several parts can layer files into one
+// target (the portable runtime puts deps-core, app and optional shards under
+// the same packages/ directory) when only the first one owns the directory.
+func ExtractOver(archive, dest, format string, stripRoot bool) error {
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	return extractInto(archive, dest, format, stripRoot)
+}
+
+// extractInto unpacks archive into dest, optionally dropping the single
+// top-level directory. The caller owns dest's lifecycle.
+func extractInto(archive, dest, format string, stripRoot bool) error {
 	switch strings.ToLower(format) {
 	case "zip":
 		return extractZip(archive, dest, stripRoot)

@@ -61,7 +61,9 @@ class _FakeMonitor:
 
 def test_broken_instance_does_not_sink_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     monitor = _FakeMonitor({"good-a": 3, "good-b": 3})
-    monkeypatch.setattr(tencent.monitor_client, "MonitorClient", lambda *_a, **_k: monitor)
+    monkeypatch.setattr(
+        tencent, "_monitor_client", lambda: SimpleNamespace(MonitorClient=lambda *_a, **_k: monitor)
+    )
 
     series = tencent._get_monitor_series(
         _credential(),
@@ -82,7 +84,9 @@ def test_trend_retries_next_batch_when_empty(monkeypatch: pytest.MonkeyPatch) ->
     points = {f"ins-{index}": 0 for index in range(12)}
     points.update({f"ins-{index}": 61 for index in range(12, 24)})
     monitor = _FakeMonitor(points)
-    monkeypatch.setattr(tencent.monitor_client, "MonitorClient", lambda *_a, **_k: monitor)
+    monkeypatch.setattr(
+        tencent, "_monitor_client", lambda: SimpleNamespace(MonitorClient=lambda *_a, **_k: monitor)
+    )
 
     targets = [{"region": "ap-guangzhou", "instance_id": f"ins-{index}"} for index in range(24)]
     trend = query_cluster_trend(
@@ -99,7 +103,9 @@ def test_trend_keeps_sampling_until_coverage(monkeypatch: pytest.MonkeyPatch) ->
     points = {f"ins-{index}": 2 for index in range(24)}
     points.update({f"ins-{index}": 61 for index in range(24, 36)})
     monitor = _FakeMonitor(points)
-    monkeypatch.setattr(tencent.monitor_client, "MonitorClient", lambda *_a, **_k: monitor)
+    monkeypatch.setattr(
+        tencent, "_monitor_client", lambda: SimpleNamespace(MonitorClient=lambda *_a, **_k: monitor)
+    )
 
     targets = [{"region": "ap-guangzhou", "instance_id": f"ins-{index}"} for index in range(36)]
     trend = query_cluster_trend(

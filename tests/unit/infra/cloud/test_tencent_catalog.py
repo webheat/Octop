@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -116,7 +117,7 @@ def test_regions_cached(monkeypatch: pytest.MonkeyPatch) -> None:
             calls.append(1)
             return FakeResponse()
 
-    monkeypatch.setattr(tencent.cvm_client, "CvmClient", FakeClient)
+    monkeypatch.setattr(tencent, "_cvm_client", lambda: SimpleNamespace(CvmClient=FakeClient))
     regions = list_regions(_credential())
     again = list_regions(_credential())
 
@@ -163,7 +164,7 @@ def test_one_region_failure_does_not_blank_the_list(monkeypatch: pytest.MonkeyPa
                 },
             )()
 
-    monkeypatch.setattr(tencent.cvm_client, "CvmClient", FakeClient)
+    monkeypatch.setattr(tencent, "_cvm_client", lambda: SimpleNamespace(CvmClient=FakeClient))
     monkeypatch.setattr(tencent.time, "sleep", lambda _s: None)
 
     result = list_instances(_credential(), ["ap-guangzhou", "ap-broken"])
