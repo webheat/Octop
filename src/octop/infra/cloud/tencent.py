@@ -29,11 +29,31 @@ from urllib.parse import urlencode
 
 from cryptography.fernet import Fernet
 
+from octop.infra.errors import OctopError
+from octop.infra.feature_deps import import_optional, missing_feature_error
+
 if TYPE_CHECKING:
     from tencentcloud.common.credential import Credential
     from tencentcloud.common.profile.client_profile import ClientProfile
 
 logger = logging.getLogger(__name__)
+
+# The SDK is an optional component (``octop[tencentcloud]``) and ships as the
+# ``deps-tencent`` runtime shard. The shell maps the part id back to a download.
+_TENCENT_FEATURE = "tencent"
+_TENCENT_PART = "deps-tencent"
+_TENCENT_COMPONENT = "octop[tencentcloud]"
+
+
+def _missing_sdk(exc: ImportError) -> OctopError:
+    """The optional Tencent Cloud SDK is not installed."""
+    return missing_feature_error(
+        _TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+        modules=("tencentcloud",),
+        detail=str(exc),
+    )
 
 
 def _cvm_client() -> Any:
@@ -42,35 +62,50 @@ def _cvm_client() -> Any:
     Keeping the SDK out of the core dependencies removes ~18MB from the
     portable runtime; only the Workbench cloud tab touches it.
     """
-    from tencentcloud.cvm.v20170312 import cvm_client
-
-    return cvm_client
+    return import_optional(
+        "tencentcloud.cvm.v20170312.cvm_client",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
 
 
 def _cvm_models() -> Any:
-    from tencentcloud.cvm.v20170312 import models
-
-    return models
+    return import_optional(
+        "tencentcloud.cvm.v20170312.models",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
 
 
 def _monitor_client() -> Any:
-    from tencentcloud.monitor.v20180724 import monitor_client
-
-    return monitor_client
+    return import_optional(
+        "tencentcloud.monitor.v20180724.monitor_client",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
 
 
 def _monitor_models() -> Any:
-    from tencentcloud.monitor.v20180724 import models
-
-    return models
+    return import_optional(
+        "tencentcloud.monitor.v20180724.models",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
 
 
 def _sdk_exception() -> type[Exception]:
-    from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
-        TencentCloudSDKException,
+    exception = import_optional(
+        "tencentcloud.common.exception.tencent_cloud_sdk_exception",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+        attr="TencentCloudSDKException",
     )
-
-    return cast(type[Exception], TencentCloudSDKException)
+    return cast(type[Exception], exception)
 
 
 def _write_private(path: Path, data: bytes) -> None:
@@ -534,8 +569,11 @@ def require_credential(store: CloudCredentialStore, user_id: int) -> CloudCreden
 
 
 def _profile(timeout_seconds: int = 20) -> ClientProfile:
-    from tencentcloud.common.profile.client_profile import ClientProfile
-    from tencentcloud.common.profile.http_profile import HttpProfile
+    try:
+        from tencentcloud.common.profile.client_profile import ClientProfile
+        from tencentcloud.common.profile.http_profile import HttpProfile
+    except ImportError as exc:
+        raise _missing_sdk(exc) from exc
 
     http = HttpProfile()
     http.reqTimeout = timeout_seconds
@@ -543,7 +581,10 @@ def _profile(timeout_seconds: int = 20) -> ClientProfile:
 
 
 def _credential_of(credential: CloudCredential) -> Credential:
-    from tencentcloud.common.credential import Credential
+    try:
+        from tencentcloud.common.credential import Credential
+    except ImportError as exc:
+        raise _missing_sdk(exc) from exc
 
     return Credential(credential.secret_id, credential.secret_key, credential.token)
 

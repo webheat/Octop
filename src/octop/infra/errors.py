@@ -181,6 +181,10 @@ class ErrorCode(StrEnum):
     TEAM_MEMBER_BUSY = "TEAM_MEMBER_BUSY"
     TEAM_NOT_SHAREABLE = "TEAM_NOT_SHAREABLE"
     LOCAL_DOWNLOAD_UNAVAILABLE = "LOCAL_DOWNLOAD_UNAVAILABLE"
+    # An optional runtime component is missing. The desktop shell reads
+    # ``details.part`` to download the matching shard on demand; servers see a
+    # 503 telling them which extra to install.
+    FEATURE_DEPS_MISSING = "FEATURE_DEPS_MISSING"
 
 
 _DEFAULT_STATUS: dict[ErrorCode, int] = {
@@ -356,6 +360,7 @@ _DEFAULT_STATUS: dict[ErrorCode, int] = {
     ErrorCode.TEAM_MEMBER_BUSY: 409,
     ErrorCode.TEAM_NOT_SHAREABLE: 400,
     ErrorCode.LOCAL_DOWNLOAD_UNAVAILABLE: 403,
+    ErrorCode.FEATURE_DEPS_MISSING: 503,
 }
 
 
