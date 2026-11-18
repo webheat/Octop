@@ -213,3 +213,50 @@ describe("applyUpdate", () => {
     expect(window.location.reload).toHaveBeenCalledOnce();
   });
 });
+
+describe("purgeStaleServiceWorker", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("unregisters leftover workers and drops their caches", async () => {
+    const unregister = vi.fn().mockResolvedValue(true);
+    const deleteCache = vi.fn().mockResolvedValue(true);
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        getRegistrations: vi.fn().mockResolvedValue([{ unregister }]),
+      },
+    });
+    Object.defineProperty(window, "caches", {
+      configurable: true,
+      value: {
+        keys: vi.fn().mockResolvedValue(["static-chunks", "html-shell"]),
+        delete: deleteCache,
+      },
+    });
+
+    const { purgeStaleServiceWorker } = await import("./sw-register");
+    await expect(purgeStaleServiceWorker()).resolves.toBe(true);
+
+    expect(unregister).toHaveBeenCalledOnce();
+    expect(deleteCache).toHaveBeenCalledWith("static-chunks");
+    expect(deleteCache).toHaveBeenCalledWith("html-shell");
+  });
+
+  it("does nothing when no worker is registered", async () => {
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        getRegistrations: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    const { purgeStaleServiceWorker } = await import("./sw-register");
+    await expect(purgeStaleServiceWorker()).resolves.toBe(false);
+  });
+});

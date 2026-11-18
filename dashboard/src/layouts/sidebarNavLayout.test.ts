@@ -64,6 +64,9 @@ describe("sidebarNavLayout", () => {
       "front",
       "settings",
       "control",
+      // 「视频制作向导」是本次新增的入口：存量布局里没有它，也没有 video
+      // 分组，所以它落到新建的 video 分组并显示出来。
+      "video",
     ]);
     expect(applied[0]?.items.map((item) => item.key)).toEqual(["chat"]);
     expect(applied[1]?.title).toBe("配置");
@@ -71,6 +74,7 @@ describe("sidebarNavLayout", () => {
       "personalization",
     ]);
     expect(applied[2]?.groupKey).toBe("nav.control");
+    expect(applied[3]?.items.map((item) => item.key)).toEqual(["video-wizard"]);
   });
 
   it("sends keys missing from a saved layout to hidden", () => {
@@ -141,9 +145,11 @@ describe("sidebarNavLayout", () => {
     expect(shown).toContain("chat");
     expect(shown).not.toContain("personalization");
     // limitedUser 看不到任何设置项 → 内置 settings / admin 分组按设计被隐藏。
+    // video 分组仍然保留：视频工具对所有账号可见，本次新增的「视频制作
+    // 向导」就落在里面。
     expect(
       visibleEditorGroups(editor, sections).map((group) => group.id),
-    ).toEqual(["c_aabbccdd"]);
+    ).toEqual(["c_aabbccdd", "video"]);
     // 能看到设置项的内置分组则保留。
     const adminSections = buildNavSections(adminUser, { mobileEnabled: true });
     const adminEditor = editorFromCatalog(adminSections, null);
@@ -161,5 +167,38 @@ describe("sidebarNavLayout", () => {
     expect(editor.groups.at(-1)?.name).toBe("常用");
     const applied = sectionsFromLayout(catalog(), layoutFromEditor(editor));
     expect(applied.some((section) => section.id === "c_aabbccdd")).toBe(false);
+  });
+});
+
+describe("newly added nav entries", () => {
+  it("shows a newly added entry in a layout saved before it existed", () => {
+    const sections = catalog();
+    // A layout saved before the video tooling shipped: no "video" group and
+    // no "video-wizard" entry.
+    const legacy = {
+      groups: [{ id: "settings" }, { id: "control" }],
+      items: [
+        { key: "chat" },
+        { key: "video-environment", group: "control" },
+      ],
+    };
+    const editor = editorFromCatalog(sections, legacy);
+    expect(editor.hidden).not.toContain("video-wizard");
+    expect(editor.itemsByGroup.video).toEqual(["video-wizard"]);
+    // The entry the user had placed keeps its placement.
+    expect(editor.itemsByGroup.control).toEqual(["video-environment"]);
+
+    const applied = sectionsFromLayout(sections, legacy);
+    const video = applied.find((section) => section.id === "video");
+    expect(video?.items.map((item) => item.key)).toEqual(["video-wizard"]);
+  });
+
+  it("keeps a newly added entry hidden when the user hid it explicitly", () => {
+    const editor = editorFromCatalog(catalog(), {
+      groups: [{ id: "video" }],
+      items: [{ key: "video-wizard", hidden: true }],
+    });
+    expect(editor.hidden).toContain("video-wizard");
+    expect(editor.itemsByGroup.video ?? []).not.toContain("video-wizard");
   });
 });
