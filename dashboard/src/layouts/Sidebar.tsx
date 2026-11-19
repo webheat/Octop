@@ -40,6 +40,10 @@ import {
 } from "../utils/railShortcuts";
 import { preferencesApi } from "../api/modules/preferences";
 import {
+  isDesktopShellContext,
+  resolveDesktopShellContext,
+} from "../desktopShellDetection";
+import {
   COLLAPSED_WIDTH,
   EXPANDED_WIDTH,
   buildNavSections,
@@ -477,10 +481,30 @@ export default function Sidebar({
         setSavedLayout(prefs.sidebar_nav ?? null);
         // Open the welcome guide once per session for users who have not
         // finished or skipped it yet.
-        if (!onboardingChecked.current) {
-          onboardingChecked.current = true;
-          if (!prefs.onboarding_completed) setOnboardingOpen(true);
+        //
+        // The desktop shell is a dedicated app for asset management and video
+        // generation, not the generic Octop console the guide introduces
+        // (chat, experts, models, channels, knowledge bases, skill packages).
+        // Those pages are not what the desktop user came for, so the guide
+        // stays closed there. The entry in the account menu is kept, so the
+        // guide can still be opened on demand.
+        if (prefs.onboarding_completed) return;
+        if (isDesktopShellContext()) {
+          // Already inside the shell — the shell marker was on the URL or the
+          // profile is a known desktop profile.
+          return;
         }
+        // The shell injects its bridges a moment after the page starts
+        // loading, so the preference request can win that race and report a
+        // plain browser. Wait for the shell to identify itself before opening
+        // the guide; if it stays silent, this is an ordinary browser and the
+        // guide opens.
+        void resolveDesktopShellContext().then((inDesktopShell) => {
+          if (cancelled || inDesktopShell) return;
+          if (onboardingChecked.current) return;
+          onboardingChecked.current = true;
+          setOnboardingOpen(true);
+        });
       })
       .catch(() => {
         /* keep the default nav */
