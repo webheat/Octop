@@ -1,7 +1,8 @@
 # 任务书：桌面运行时「分层下载」改造（核心包 + 按需环境包）
 
-> 状态：**PR-0 / PR-1 已实施并合入 `develop`**（2026-11-19）；PR-3 / PR-5 为设计 + 原型，
-> 仍待落地。交付报告见 `docs/desktop-runtime-layered-download-report-pr0.md` /
+> 状态：**PR-0 / PR-1 已实施并合入 `develop`**（2026-11-19）；PR-5 的后端契约、壳桥接与
+> 页面重试也已落地；**PR-3 进度面板与「装完即生效」仍未落地**；PR-0b / 真机验收待办。
+> 交付报告见 `docs/desktop-runtime-layered-download-report-pr0.md` /
 > `-pr1.md` / `-pr35.md`，PR-3·PR-5 设计见 `docs/desktop-runtime-layered-download-pr3-pr5.md`。
 > 目标读者：接手的 LLM / 开发
 > 关联设计：`docs/desktop-bootstrap-installer.md`（**方案与路线图的权威文档，本文不重复设计，只固化可执行待办与代码证据**）
@@ -118,9 +119,14 @@
 ## 5. 验收标准
 
 - [ ] slim 首启下载体积显著下降（目标：246MB → ≤190MB，PR-0 后；进一步下降依赖 PR-0b）
+      —— 代码已就位，**体积数字待 Windows 真机重打 zip 后确认**
 - [ ] manifest 多 part 下载成功，断点续传 / SHA256 / 多镜像 fallback 均工作
-- [ ] 可选 part（如 tencentcloud）在用户触发相关功能时才下载（PR-5）
+      —— 下载器与分片脚本已就位，**待真机跑通**
+- [x] 可选 part（如 tencentcloud）在用户触发相关功能时才下载（PR-5）
+      —— 后端回 `FEATURE_DEPS_MISSING` + `details.part`，壳按 id 安装，页面重试一次；
+      仍缺「装完即生效」（运行中进程要重启）与真实 manifest 发布
 - [ ] 素材库 / 浏览器 / 视频等核心功能无回归
+      —— 服务器侧已通过部署入口补齐 extra 保住能力面，**待真机回归**
 - [ ] 真 Windows 上验证（CI 有 `windows-latest`，但 Windows 路径 / 长路径问题必须真机验，见设计文档 `:556`）
 
 ---

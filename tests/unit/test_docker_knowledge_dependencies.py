@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 
@@ -47,9 +48,19 @@ def test_fnos_source_dockerfile_installs_knowledge_extras() -> None:
     """
     repo = Path(__file__).resolve().parents[2]
     dockerfile = (repo / "fnos" / "docker" / "Dockerfile").read_text(encoding="utf-8")
-    assert ".[desktop,local-embedding,knowledge-ocr]" in dockerfile
+    # The image installs the extras as a set: the runtime slimming added
+    # browser / tencentcloud next to the knowledge runtimes.
+    assert {"desktop", "local-embedding", "knowledge-ocr"} <= _fnos_extras(dockerfile)
     assert _desktop_smoke_import(dockerfile)
     assert "bake-desktop.sh" in dockerfile
+
+
+def _fnos_extras(dockerfile: str) -> set[str]:
+    """Every extra the FnOS image installs, across its lite and full variants."""
+    extras: set[str] = set()
+    for match in re.finditer(r'"\.\[([^\]]+)\]"', dockerfile):
+        extras.update(part.strip() for part in match.group(1).split(",") if part.strip())
+    return extras
 
 
 def test_variant_is_validated_and_compiler_is_purged_in_the_install_layer() -> None:

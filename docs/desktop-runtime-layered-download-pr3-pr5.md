@@ -1,9 +1,19 @@
 # PR-3 / PR-5 设计：下载进度面板与可选组件按需补齐
 
-> 状态：**设计稿 + 最小原型**（2026-11-19）
+> 状态：**设计稿 + 已落地部分**（2026-11-19 实施后回填）
 > 前置阅读：`docs/desktop-runtime-layered-download-task.md`（任务书）、
 > `docs/desktop-bootstrap-installer.md`（方案权威文档，§5.2 / §6 / §九）
 > 代码基线：分支 `feature/layered-download-pr35`，commit `affc8623`
+>
+> **已落地（见 §6 的「现状」列）**
+>
+> - PR-5c 后端契约：`ErrorCode.FEATURE_DEPS_MISSING` + `infra/feature_deps.py`，
+>   腾讯云 SDK 缺失时回 503 并带 `details.part`
+> - PR-5b 壳桥接：`window.octopDesktopRuntime`（`install_part` / `parts`），
+>   壳侧 `installRuntimePart()` 走 `bootstrap.RunParts`
+> - 页面侧重试：`api/request.ts` 命中 `FEATURE_DEPS_MISSING` 时让壳装分片并重试一次
+> - 未落地：PR-3 进度面板（真实百分比 / 阶段 / 重试 UI）、§4.5 的运行中
+>   `sys.path` 追加（装完分片后需重启进程才能 import）
 
 ---
 
@@ -177,7 +187,16 @@ type Part struct {
 
 ### 3.3 target 布局（PR-1 必须改）
 
-当前 `Extract` 会清空 dest，所以**两种可行布局**：
+> **实施结果（2026-11-19）**：PR-1 落地时选了下面的**方案 B**，并把字段名定为
+> `Append`（`bootstrap.Part.Append`，JSON `append`）而不是 `Additive`。共享
+> `packages/` 目标的做法成立：同一 target 的**第一个**分片照旧清空目录，后续分片
+> 走 `ExtractOver()` 只写不删。因此可选分片一律标 `append: true`，
+> 按需安装（`RunParts` 只装这一片）不会清空已装好的 `packages/`。
+> 分片 id 以 PR-1 的打包脚本为准：`deps-tencent` / `deps-google` / `deps-boto` /
+> `deps-lark`（本节表格里的 `deps-browser` / `deps-feishu` / `deps-aws` 是设计期
+> 命名，落地时按发行版归组，浏览器与飞书仍是核心依赖，暂不分片）。
+>
+> 当前 `Extract` 会清空 dest，所以**两种可行布局**：
 
 **方案 A（推荐，零 Go 解压改动）**：每个可选 part 独占子目录 + 静态 `.pth`
 
@@ -485,21 +504,24 @@ type ProgressEvent struct {
 
 ### PR-5b：按需安装入口（低风险，原型已完成）
 
-| 文件 | 改动 |
-|---|---|
-| `desktop/src/bootstrap/run_parts.go`（**新增，已提交**） | `RunParts(opts, partIDs)` |
-| `desktop/src/bootstrap/run_parts_test.go`（**新增，已提交**） | 4 个用例 |
-| `desktop/src/runtime_install.go`（新增） | 单飞（mutex）安装器、状态机、manifest 缓存 |
-| `desktop/src/video_bridge.go` 或 `runtime_bridge.go`（新增） | 注入 `window.octopDesktopRuntime` |
+| 文件 | 改动 | 现状 |
+|---|---|---|
+| `desktop/src/bootstrap/run_parts.go`（**新增，已提交**） | `RunParts(opts, partIDs)` | 已落地 |
+| `desktop/src/bootstrap/run_parts_test.go`（**新增，已提交**） | 4 个用例 | 已落地 |
+| `desktop/src/runtime_install.go`（新增） | 按 id 安装可选分片；根分片拒绝按需安装 | 已落地（单飞/状态机未做，壳侧串行调用足够） |
+| `desktop/src/runtime_bridge.go`（新增） | 注入 `window.octopDesktopRuntime`（`install_part` / `parts`） | 已落地 |
+| `desktop/src/main.go` | 记录 dashboard base、注入桥、挂事件监听 | 已落地 |
 
 ### PR-5c：壳与后端的契约（需跨范围协调）
 
-| 文件 | 改动 |
-|---|---|
-| `src/octop/infra/errors.py` | 新增 `FEATURE_DEPS_MISSING`（**src/octop，非本 worker 范围**） |
-| `src/octop/i18n/{en,zh}.json` | 对应文案 |
-| 各 feature 的 `ensure_*` | import 探测；缺依赖抛上述错误并带 `details.part` |
-| `dashboard/src/api/...` | 识别错误码 → 调 runtime 桥 → 重试 |
+| 文件 | 改动 | 现状 |
+|---|---|---|
+| `src/octop/infra/errors.py` | 新增 `FEATURE_DEPS_MISSING` | 已落地（503） |
+| `src/octop/i18n/{en,zh}.json` | 对应文案 | 已落地（`{component}` 占位） |
+| `src/octop/infra/feature_deps.py` | `import_optional()`：ImportError → 该错误 | 已落地 |
+| 各 feature 的 `ensure_*` | import 探测；缺依赖抛上述错误并带 `details.part` | 已落地（腾讯云）；浏览器 / 飞书仍为核心依赖，暂不需要 |
+| `dashboard/src/api/...` | 识别错误码 → 调 runtime 桥 → 重试 | 已落地（`api/request.ts` 重试一次） |
+| 运行中可见性（§4.5） | 装完分片后追加 `sys.path` | **未落地**：分片解到 `packages/` 下，运行中的 Python 进程要重启才能 import |
 
 ---
 
