@@ -124,4 +124,4 @@ A：M1（Web 选目录 → 识别分组 → 复核 → 入库）已实现并可�
 
 - `docs/product-image-batch-import.md` —— 目录导入功能规划（M1/M2/M3）
 - `docs/product-material-library.md` —— 产品素材库整体规划
-- `docs/design/product-library-mvp.md` —— 素材库 MVP 设计
+- `docs/archive/product-library-mvp.md` —— 素材库 MVP 设计（历史归档，仅作背景参考）

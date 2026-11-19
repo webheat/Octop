@@ -42,7 +42,7 @@
 
 ### 4. PG 文件存储：复用 PostgresBackend 形态，分表隔离
 
-不新造 zip 整包或平行 bytea 协议。技能包源、知识库原文均按 harness [`PostgresBackend`](../../../octop-harness/src/octop_harness/backends/postgres.py) 的方式入库（`path` + `content` JSONB 等），并与专家 workspace 表隔离，例如：
+不新造 zip 整包或平行 bytea 协议。技能包源、知识库原文均按 harness `PostgresBackend`（octop-harness 仓库 `src/octop_harness/backends/postgres.py`）的方式入库（`path` + `content` JSONB 等），并与专家 workspace 表隔离，例如：
 
 - `public.skill_package_files`
 - `public.knowledge_files`
