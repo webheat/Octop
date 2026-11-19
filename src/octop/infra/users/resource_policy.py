@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from octop.infra.errors import ErrorCode, OctopError
@@ -21,6 +23,7 @@ _LOCAL_BACKEND_KINDS = {"local_shell", "filesystem"}
 
 POLICY_WORKSPACE_ROOT_DIR = "workspace_root_dir"
 POLICY_TOKEN_QUOTA = "token_quota"
+POLICY_TOKEN_QUOTA_WINDOW = "token_quota_window"
 POLICY_MAX_AGENTS = "max_agents"
 POLICY_ALLOWED_BACKEND_TYPES = "allowed_backend_types"
 
@@ -42,6 +45,10 @@ BACKEND_POLICY_TYPES: tuple[str, ...] = (
 )
 _BACKEND_POLICY_TYPE_SET = frozenset(BACKEND_POLICY_TYPES)
 _POLICY_TYPE_ALIASES = {"shell": "local_shell"}
+
+#: ``token_quota_window`` aliases accepted for quota accounting. ``all`` keeps the
+#: legacy lifetime semantics; the rest match ``UsageRepo`` usage windows.
+TOKEN_QUOTA_WINDOWS = ("all", "today", "last_7d", "last_30d", "month", "day")
 
 
 def active_policy_value(row: Any) -> str | None:
@@ -113,6 +120,27 @@ def max_agents_of(raw: Any) -> int | None:
         return None
 
 
+def token_quota_window_of(raw: Any) -> str:
+    """Quota accounting window; missing or unknown values fall back to ``all``."""
+    if isinstance(raw, Mapping) and "value" not in raw:
+        raw = raw.get(POLICY_TOKEN_QUOTA_WINDOW)
+    window = (active_policy_value(raw) or "all").strip().lower()
+    return window if window in TOKEN_QUOTA_WINDOWS else "all"
+
+
+def usage_window_for_quota(window: str, *, now: int | None = None) -> str:
+    """Translate a quota window alias into a ``UsageRepo`` usage window."""
+    if window == "all":
+        return "all"
+    if window == "month":
+        stamp = datetime.fromtimestamp(int(time.time() if now is None else now), tz=UTC)
+        return f"month:{stamp:%Y-%m}"
+    if window == "day":
+        stamp = datetime.fromtimestamp(int(time.time() if now is None else now), tz=UTC)
+        return f"day:{stamp:%Y-%m-%d}"
+    return window
+
+
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:
     """HTTP-facing subset of known policies (disabled / missing = unlimited)."""
     by_name: dict[str, str] = {}
@@ -127,6 +155,7 @@ def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict
     return {
         "workspace_root_dir": workspace_root_dir_of(by_name),
         "token_quota": token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
+        "token_quota_window": token_quota_window_of(by_name.get(POLICY_TOKEN_QUOTA_WINDOW)),
         "max_agents": max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
         "allowed_backend_types": allowed_backend_types_of(
             by_name.get(POLICY_ALLOWED_BACKEND_TYPES)
@@ -349,6 +378,22 @@ def raise_if_backend_types_disallowed(
     )
 
 
+def normalize_token_quota_window(raw: str | None) -> str | None:
+    """Canonical quota window, or ``None`` to clear the policy (lifetime billing)."""
+    if raw is None:
+        return None
+    window = str(raw).strip().lower()
+    if not window:
+        return None
+    if window not in TOKEN_QUOTA_WINDOWS:
+        raise OctopError(
+            ErrorCode.FORBIDDEN,
+            f"token quota window must be one of {list(TOKEN_QUOTA_WINDOWS)}",
+            status=400,
+        )
+    return window
+
+
 def assert_backend_within_user_root(
     backend: Any,
     allowed_root: str | None,
@@ -517,17 +562,38 @@ def apply_workspace_root_to_config(
         raise OctopError(ErrorCode.WORKSPACE_ROOT_RESTRICTED, str(exc)) from exc
 
 
-def assert_token_quota_available(policy_repo: Any, usage_repo: Any, user_id: int) -> None:
-    """Raise when the user's lifetime ``total_tokens`` is at or above quota."""
+def assert_token_quota_available(
+    policy_repo: Any,
+    usage_repo: Any,
+    user_id: int,
+    *,
+    timezone: str = "UTC",
+) -> None:
+    """Raise when tokens used inside ``token_quota_window`` reach the quota.
+
+    ``token_quota_window`` defaults to ``all`` (legacy lifetime accounting);
+    ``today`` / ``last_7d`` / ``last_30d`` / ``month`` / ``day`` compare the
+    windowed total instead, so an exhausted user recovers when the window rolls.
+    """
     quota = token_quota_of(policy_repo.get(user_id, POLICY_TOKEN_QUOTA))
     if quota is None:
         return
-    used = int(usage_repo.total_tokens_for_user(user_id))
+    window = token_quota_window_of(policy_repo.get(user_id, POLICY_TOKEN_QUOTA_WINDOW))
+    if window == "all":
+        used = int(usage_repo.total_tokens_for_user(user_id))
+    else:
+        used = int(
+            usage_repo.total_tokens_for_user_window(
+                user_id,
+                usage_window_for_quota(window),
+                timezone=timezone,
+            )
+        )
     if used >= quota:
         raise OctopError(
             ErrorCode.TOKEN_QUOTA_EXCEEDED,
             "token quota exceeded",
-            details={"used": used, "quota": quota},
+            details={"used": used, "quota": quota, "window": window},
         )
 
 

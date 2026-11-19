@@ -586,6 +586,7 @@ class UserManager:
         *,
         workspace_root_dir: Any = UNSET,
         token_quota: Any = UNSET,
+        token_quota_window: Any = UNSET,
         max_agents: Any = UNSET,
         allowed_backend_types: Any = UNSET,
     ) -> None:
@@ -593,10 +594,12 @@ class UserManager:
             POLICY_ALLOWED_BACKEND_TYPES,
             POLICY_MAX_AGENTS,
             POLICY_TOKEN_QUOTA,
+            POLICY_TOKEN_QUOTA_WINDOW,
             POLICY_WORKSPACE_ROOT_DIR,
             normalize_allowed_backend_types,
             normalize_max_agents,
             normalize_token_quota,
+            normalize_token_quota_window,
             normalize_workspace_root_dir,
         )
 
@@ -617,6 +620,10 @@ class UserManager:
         if max_agents is not UNSET:
             max_agents_arg = normalize_max_agents(max_agents)
             updates[POLICY_MAX_AGENTS] = None if max_agents_arg is None else str(max_agents_arg)
+        window_arg: Any = UNSET
+        if token_quota_window is not UNSET:
+            window_arg = normalize_token_quota_window(token_quota_window)
+            updates[POLICY_TOKEN_QUOTA_WINDOW] = window_arg
         if allowed_backend_types is not UNSET:
             backend_types_arg = normalize_allowed_backend_types(allowed_backend_types)
             updates[POLICY_ALLOWED_BACKEND_TYPES] = backend_types_arg
@@ -644,6 +651,13 @@ class UserManager:
                 target=username,
                 payload=str(max_agents_arg) if max_agents_arg is not None else "",
             )
+        if token_quota_window is not UNSET:
+            self._services.audit_repo.write(
+                actor=ACTOR_ADMIN,
+                action="user.set_token_quota_window",
+                target=username,
+                payload=window_arg or "",
+            )
         if allowed_backend_types is not UNSET:
             self._services.audit_repo.write(
                 actor=ACTOR_ADMIN,
@@ -660,6 +674,9 @@ class UserManager:
 
     async def set_max_agents(self, username: str, max_agents: int | None) -> None:
         await self.set_resource_policy(username, max_agents=max_agents)
+
+    async def set_token_quota_window(self, username: str, token_quota_window: str | None) -> None:
+        await self.set_resource_policy(username, token_quota_window=token_quota_window)
 
     async def set_role(self, username: str, role: Role | str) -> None:
         row = self._services.user_repo.get_by_username(username)

@@ -536,3 +536,28 @@ class UsageRepo:
                 (user_id,),
             ).fetchone()
         return int(row["total"] if row is not None else 0)
+
+    def total_tokens_for_user_window(
+        self,
+        user_id: int,
+        window: str,
+        *,
+        timezone: str = "UTC",
+        now: int | None = None,
+    ) -> int:
+        """``total_tokens`` for one user inside a usage window.
+
+        ``window`` takes the same aliases as ``resolve_usage_window``; ``all``
+        equals the lifetime total. Unknown aliases follow that function's
+        fallback (last 30 days).
+        """
+        start, end = resolve_usage_window(window, timezone=timezone, now=now)
+        with self._db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(total_tokens), 0) AS total FROM usage_log
+                WHERE user_id = ? AND ts >= ? AND ts < ?
+                """,
+                (user_id, start, end),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)

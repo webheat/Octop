@@ -583,3 +583,31 @@ async def test_sharing_audience_counts_enabled_users_and_groups(env):
     assert group.status_code == 201, group.text
     body = (await c.get("/api/user-groups/audience", headers=auth)).json()
     assert body == {"user_count": 1, "group_count": 1}
+
+
+async def test_admin_can_set_token_quota_window(env):
+    """Quota window round-trips and rejects unknown aliases."""
+    from tests.support.auth import TEST_PASSWORD, create_user
+
+    c, _srv, auth = env
+    await create_user(c, auth, username="window_user", password=TEST_PASSWORD)
+    row = next(
+        u
+        for u in (await c.get("/api/users", headers=auth)).json()
+        if u["username"] == "window_user"
+    )
+    assert row["token_quota_window"] == "all"
+
+    uid = row["id"]
+    r = await c.patch(
+        f"/api/users/{uid}", headers=auth, json={"token_quota": 500, "token_quota_window": "today"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["token_quota_window"] == "today"
+
+    bad = await c.patch(f"/api/users/{uid}", headers=auth, json={"token_quota_window": "weekly"})
+    assert bad.status_code == 400, bad.text
+
+    cleared = await c.patch(f"/api/users/{uid}", headers=auth, json={"token_quota_window": None})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["token_quota_window"] == "all"

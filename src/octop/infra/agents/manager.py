@@ -4570,6 +4570,7 @@ class AgentManager:
             TokenQuotaMiddleware(
                 policy_repo=self._repos.user_policy_repo,
                 usage_repo=self._repos.usage_repo,
+                timezone=self._config.default_timezone,
             ),
             ReasoningRequestMiddleware(),
             TeamDispatchBriefingMiddleware(),

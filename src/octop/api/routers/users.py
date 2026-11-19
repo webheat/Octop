@@ -23,6 +23,7 @@ from octop.infra.users.resource_policy import (
     normalize_allowed_backend_types,
     normalize_max_agents,
     normalize_token_quota,
+    normalize_token_quota_window,
     normalize_workspace_root_dir,
     public_policy_fields,
 )
@@ -54,6 +55,13 @@ class UserCreateBody(BaseModel):
     role_name: str | None = Field(default=None, max_length=64)
     workspace_root_dir: str | None = None
     token_quota: int | None = Field(default=None, ge=0)
+    token_quota_window: str | None = Field(
+        default=None,
+        description=(
+            "Quota accounting window: all | today | last_7d | last_30d | month | day. "
+            "null keeps lifetime (all)."
+        ),
+    )
     max_agents: int | None = Field(default=None, ge=0)
     allowed_backend_types: list[str] | None = Field(
         default=None,
@@ -83,6 +91,13 @@ class UserPatchBody(BaseModel):
     avatar_icon: str | None = Field(default=None, max_length=32)
     workspace_root_dir: str | None = None
     token_quota: int | None = Field(default=None, ge=0)
+    token_quota_window: str | None = Field(
+        default=None,
+        description=(
+            "Quota accounting window: all | today | last_7d | last_30d | month | day. "
+            "null clears the policy (lifetime accounting)."
+        ),
+    )
     max_agents: int | None = Field(default=None, ge=0)
     allowed_backend_types: list[str] | None = Field(
         default=None,
@@ -222,16 +237,19 @@ def _policy_kwargs_replace_from_pairs(pairs: list[tuple[str, str]]) -> dict[str,
         POLICY_ALLOWED_BACKEND_TYPES,
         POLICY_MAX_AGENTS,
         POLICY_TOKEN_QUOTA,
+        POLICY_TOKEN_QUOTA_WINDOW,
         POLICY_WORKSPACE_ROOT_DIR,
         allowed_backend_types_of,
         max_agents_of,
         token_quota_of,
+        token_quota_window_of,
     )
 
     by_name = dict(pairs)
     return {
         "workspace_root_dir": by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         "token_quota": token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
+        "token_quota_window": token_quota_window_of(by_name.get(POLICY_TOKEN_QUOTA_WINDOW)),
         "max_agents": max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
         "allowed_backend_types": allowed_backend_types_of(
             by_name.get(POLICY_ALLOWED_BACKEND_TYPES)
@@ -256,6 +274,8 @@ def _policy_kwargs_from_body(body: UserCreateBody | UserPatchBody) -> dict[str, 
         policy_kwargs["workspace_root_dir"] = body.workspace_root_dir
     if "token_quota" in body.model_fields_set:
         policy_kwargs["token_quota"] = body.token_quota
+    if "token_quota_window" in body.model_fields_set:
+        policy_kwargs["token_quota_window"] = body.token_quota_window
     if "max_agents" in body.model_fields_set:
         policy_kwargs["max_agents"] = body.max_agents
     if "allowed_backend_types" in body.model_fields_set:
@@ -384,6 +404,8 @@ async def create_user(
         normalize_workspace_root_dir(policy_kwargs["workspace_root_dir"])
     if "token_quota" in policy_kwargs:
         normalize_token_quota(policy_kwargs["token_quota"])
+    if "token_quota_window" in policy_kwargs:
+        normalize_token_quota_window(policy_kwargs["token_quota_window"])
     if "max_agents" in policy_kwargs:
         normalize_max_agents(policy_kwargs["max_agents"])
     if "allowed_backend_types" in policy_kwargs:
