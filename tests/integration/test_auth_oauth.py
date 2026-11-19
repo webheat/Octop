@@ -68,6 +68,83 @@ async def test_oauth_public_routes_and_oidc_kind_share_redirect(
     assert via_oidc.json()["user"]["username"] == "admin"
 
 
+async def test_sso_exchange_bootstraps_default_agent_once(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from octop.infra.agents.experts import default_agent as default_agent_module
+
+    c, srv, home = client
+    await bootstrap_admin(c, home)
+    assert srv.user_manager is not None
+    user = await srv.user_manager.create(username="ssouser", password="TestPass12", role="user")
+    assert srv.app_runtime is not None
+    registry = srv.app_runtime.agent_registry
+    assert registry.list_agents(user.id) == []
+
+    async def exchange(self: SsoService, code: str):
+        return user
+
+    # ``general-assistant`` is not bundled, the bootstrap would pull it from the
+    # market. Serve it from the bundled ``default`` template instead so the test
+    # never touches the network — the agent id stays ``general-assistant``.
+    assert srv.expert_catalog is not None
+    template = srv.expert_catalog.get("default")
+    assert template is not None
+
+    async def installed(self: Any, expert_id: str) -> bool:
+        return expert_id == default_agent_module.DEFAULT_EXPERT_ID
+
+    original_build = default_agent_module.build_create_spec_from_expert
+
+    monkeypatch.setattr(SsoService, "exchange_login_code", exchange)
+    monkeypatch.setattr(default_agent_module, "materialize_market_expert", installed)
+    monkeypatch.setattr(
+        default_agent_module,
+        "build_create_spec_from_expert",
+        # The bootstrap resolves the template itself; swap it for the bundled
+        # one so no market download is needed.
+        lambda *, expert_id, expert, **kwargs: original_build(
+            expert_id=expert_id, expert=template, **kwargs
+        ),
+    )
+
+    first = await c.post("/api/auth/oidc/exchange", json={"code": "one-time"})
+    assert first.status_code == 200
+    assert first.json()["access_token"]
+    agents = registry.list_agents(user.id)
+    # The agent id is auto-allocated; the template is what the bootstrap picks.
+    assert [agent.template_name for agent in agents] == [default_agent_module.DEFAULT_EXPERT_ID]
+
+    second = await c.post("/api/auth/oidc/exchange", json={"code": "one-time"})
+    assert second.status_code == 200
+    assert len(registry.list_agents(user.id)) == 1
+
+
+async def test_sso_exchange_login_survives_agent_bootstrap_failure(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from octop.infra.agents.experts import default_agent as default_agent_module
+
+    c, srv, home = client
+    await bootstrap_admin(c, home)
+    assert srv.user_manager is not None
+    user = await srv.user_manager.create(username="ssoluckless", password="TestPass12", role="user")
+
+    async def exchange(self: SsoService, code: str):
+        return user
+
+    async def boom(self: Any, **_: Any) -> None:
+        raise RuntimeError("default assistant unavailable")
+
+    # ``try_bootstrap_default_agent`` swallows the failure; login must still work.
+    monkeypatch.setattr(SsoService, "exchange_login_code", exchange)
+    monkeypatch.setattr(default_agent_module, "bootstrap_first_expert", boom)
+
+    response = await c.post("/api/auth/oidc/exchange", json={"code": "one-time"})
+    assert response.status_code == 200
+    assert response.json()["user"]["username"] == "ssoluckless"
+
+
 async def test_oauth_bind_requires_auth_and_providers_are_not_public(client) -> None:
     c, _srv, home = client
     await bootstrap_admin(c, home)
