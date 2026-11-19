@@ -16,6 +16,11 @@ interface AgentNotReadyScreenProps {
   loading?: boolean;
   /** Whether this user may open the model settings themselves. */
   canConfigureModels?: boolean;
+  /**
+   * Running inside the desktop shell. There is no console to send the user to,
+   * so the recovery actions point at settings / re-login instead of `/experts`.
+   */
+  desktopShell?: boolean;
 }
 
 export default function AgentNotReadyScreen({
@@ -23,6 +28,7 @@ export default function AgentNotReadyScreen({
   noAgents = false,
   loading = false,
   canConfigureModels = true,
+  desktopShell = false,
 }: AgentNotReadyScreenProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -36,6 +42,36 @@ export default function AgentNotReadyScreen({
   }
 
   if (noAgents) {
+    /**
+     * The desktop shell hides every create entry, so "create your first
+     * expert" would be a dead end there: the account is supposed to get an
+     * assistant automatically at sign-in. Tell the user what to do instead of
+     * showing a path the shell does not have.
+     */
+    if (desktopShell) {
+      return (
+        <div className={styles.noAgentsEmpty}>
+          <div className={styles.noAgentsEmptyInner}>
+            <div className={styles.noAgentsEmptyIcon}>
+              <OctopEmptyMascot className={styles.noAgentsEmptyMascot} />
+            </div>
+            <h1 className={styles.noAgentsEmptyTitle}>
+              {t("chat.desktopNoAgentsTitle")}
+            </h1>
+            <p className={styles.noAgentsEmptyHint}>
+              {t("chat.desktopNoAgentsHint")}
+            </p>
+            <Button
+              type="primary"
+              size="large"
+              onClick={() => window.location.reload()}
+            >
+              {t("chat.desktopRetry")}
+            </Button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={styles.noAgentsEmpty}>
         <div className={styles.noAgentsEmptyInner}>
@@ -133,6 +169,10 @@ export default function AgentNotReadyScreen({
                   ? "chat.remoteExpert.openBridge"
                   : "chat.remoteExpert.reconnect",
               )}
+            </Button>
+          ) : desktopShell ? (
+            <Button type="primary" onClick={() => navigate("/admin/models")}>
+              {t("modelConfig.configureButton")}
             </Button>
           ) : (
             <Button type="primary" onClick={() => navigate("/experts")}>

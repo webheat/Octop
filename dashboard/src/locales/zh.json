@@ -2448,7 +2448,10 @@
     "historyRetry": "重试",
     "creatingSession": "正在创建会话，请稍候",
     "resizePopup": "调整窗口大小",
-    "unreadMessages": "未读消息"
+    "unreadMessages": "未读消息",
+    "desktopNoAgentsHint": "你的助手应该已经自动创建好了，这次没有成功。请重新加载；若仍然如此，请重新登录一次。",
+    "desktopNoAgentsTitle": "助手没有准备成功",
+    "desktopRetry": "重新加载"
   },
   "tools": {
     "unknown": "未知工具",

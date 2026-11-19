@@ -22,7 +22,11 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import zhBundle from "../locales/zh.json";
+import { installMemoryLocalStorage } from "./localStoragePolyfill";
 import enBundle from "../locales/en.json";
+
+// jsdom can expose `localStorage` as defined-but-`undefined`.
+installMemoryLocalStorage();
 
 // --- ``DOMMatrix`` stub (needed by pdfjs-dist) ------------------------
 // jsdom and Node don't expose the CSSOM ``DOMMatrix`` global, but

@@ -89,3 +89,58 @@ describe("AgentNotReadyScreen", () => {
     ).toBeInTheDocument();
   });
 });
+
+/**
+ * The desktop shell has no console to send the user to: every create entry is
+ * hidden there and the assistant is provisioned at sign-in. The recovery
+ * actions must point at something the shell actually offers.
+ */
+describe("AgentNotReadyScreen in the desktop shell", () => {
+  it("does not offer the create-expert path when there is no assistant", () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <AgentNotReadyScreen agent={null} noAgents desktopShell />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("chat.desktopNoAgentsTitle")).toBeInTheDocument();
+    expect(screen.queryByText("chat.noAgentsTitle")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "chat.createExpert" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "chat.desktopRetry" }),
+    ).toBeInTheDocument();
+  });
+
+  it("sends a stopped assistant to model settings instead of the expert list", () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <AgentNotReadyScreen
+          agent={agentWith({ state: "stopped" })}
+          desktopShell
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("chat.agentNotRunning")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "modelConfig.configureButton" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "chat.goToExperts" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the browser recovery path", () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <AgentNotReadyScreen agent={agentWith({ state: "stopped" })} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "chat.goToExperts" }),
+    ).toBeInTheDocument();
+  });
+});

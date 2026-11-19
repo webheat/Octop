@@ -2448,7 +2448,10 @@
     "historyRetry": "Retry",
     "creatingSession": "Creating session…",
     "resizePopup": "Resize window",
-    "unreadMessages": "Unread messages"
+    "unreadMessages": "Unread messages",
+    "desktopNoAgentsHint": "Your assistant is created for you automatically, but it did not make it this time. Reload to try again — if that does not help, sign in again.",
+    "desktopNoAgentsTitle": "Your assistant is not ready",
+    "desktopRetry": "Reload"
   },
   "tools": {
     "unknown": "Unknown tool",
