@@ -563,15 +563,17 @@ fi
 _ensure_old_glibc_build_toolchain
 
 # ── 步骤 3: 安装 Octop ───────────────────────────────────────────────────────
-# playwright Python 包已是核心依赖；Chromium 浏览器仅在 --extras browser 时下载。
+# playwright / tencentcloud-sdk-python 已是 extra（不再是核心依赖，运行时瘦身）；
+# 两者仍留在默认集合里，保证服务器安装后浏览器工具与云工作台照常可用。
+# Chromium 浏览器本体仅在 --extras browser 时下载。
 _merge_install_extras() {
-    local result="browser"
+    local result="browser,tencentcloud"
     if [ -n "$EXTRAS" ]; then
         local IFS=','
         local part
         for part in $EXTRAS; do
             case "$part" in
-                ""|browser|channels-feishu) continue ;;
+                ""|browser|tencentcloud|channels-feishu) continue ;;
                 *) result="${result},${part}" ;;
             esac
         done

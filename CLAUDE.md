@@ -12,11 +12,21 @@ Octop — self-hosted AI assistant platform (multi-user, multi-agent), shipped a
 
 ## Commands
 
-`make` is the project's entry point (`Makefile`, `SHELL := /bin/bash`), but **`make` is not installed on this host** (`mingw32-make` exists in `C:\mingw64\bin` but the Makefile assumes a POSIX bash env). Run the underlying commands directly; keep the Makefile as the source of truth for CI.
+`make` is the project's entry point (`Makefile`, `SHELL := /bin/bash`); GNU Make 4.3 is installed on this host and every target wraps `uv run` when `uv` is present. `make test` adds `-n auto` (pytest-xdist) — the bare `uv run pytest` forms below run serially; use the Makefile when you want exact CI behavior.
 
 ```bash
 # install (creates .venv on first run)
 uv sync
+
+# run locally (first run: `octop init` wizard creates ~/.octop DB + admin account)
+uv run octop init
+uv run octop run                    # API + dashboard on 127.0.0.1:8088
+make dev                            # Vite dev server + octop run together
+
+# ship bar / fast gates
+make all                            # format-all + lint + typecheck + test
+make test-smoke                     # fast subset used by the pre-commit hook
+make test-affected                  # pytest-testmon; do NOT add -m (markers disable selection)
 
 # tests — always `uv run pytest`, never bare `pytest`
 uv run pytest -m "not live"                              # full suite (ship bar)
@@ -42,7 +52,7 @@ cd dashboard && npm test          # vitest
 cd dashboard && npm run build     # → src/octop/dashboard/  (never edit that dir by hand)
 
 # git hooks (once per clone)
-git config core.hooksPath .githooks
+make install-hooks                 # = git config core.hooksPath .githooks
 ```
 
 pytest markers: `live` (hits real LLM/external), `slow` (expensive: integration boot, real harness, browser), `postgresql` (needs `OCTOP_TEST_DATABASE_URL`). `asyncio_mode = "auto"` — async tests need no decorator.
@@ -56,14 +66,14 @@ Layering and hard bans are defined in `AGENTS.md` §5; the short version — dep
 | `src/octop/infra/server.py` | `OctopServer.start()` — the composition root; wires repos, agents, gateway, cron, plugins, experts |
 | `src/octop/launch.py` | The **only** module allowed to import both `infra/server` and `api/app`; serves uvicorn |
 | `src/octop/api/` | FastAPI: `app.py` (factory), `deps.py` (JWT → `current_user`, `get_server`), `middleware/`, `routers/` (~60 routers, one per resource) |
-| `src/octop/infra/` | Domain: `agents/`, `gateway/`, `db/`, `history/`, `cron/`, `skills/`, `connectors/`, `users/`, `auth/`, `setup/`, `knowledge/`, `backend/`, `bridge/`, `voice/`, `proactive/`, `mobile/`, `browser/`, `agent_mcp/`, `errors.py`, `metrics.py` |
+| `src/octop/infra/` | Domain: `agents/`, `gateway/`, `db/`, `history/`, `cron/`, `skills/`, `connectors/`, `users/`, `auth/`, `setup/`, `knowledge/`, `backend/`, `bridge/`, `voice/`, `proactive/`, `mobile/`, `browser/`, `agent_mcp/`, `product_library/`, `control/`, `errors.py`, `metrics.py` |
 | `src/octop/cli/` | Click commands: `commands/`, `support/` (offline / embedded / bridge / external transports), `repl/` |
 | `src/octop/i18n/` | `en.json` / `zh.json` bundles + `domains/*.py` helpers (`tr()`, `error_message()`, `tool_display_name()`) |
 | `dashboard/src/` | React app: `api/` → `pages/` → `components/`, `hooks/`, `context/`, `locales/` |
 
 **Dependency injection:** routers get `server: OctopServer = Depends(get_server)`; every repo is reached through `server.services` (`SharedServices` from `infra/db/services.py`). Never import a repo at module level outside `SharedServices` / `RepoBundle`.
 
-**Database:** SQLite (WAL) or PostgreSQL, one shared schema. Migrations are numbered pairs `src/octop/infra/db/migrations/00N_desc.sql` + `00N_desc.pg.sql`; the latest pair is **`022_product_library`**, and the version assertion in `tests/unit/db/test_db_pool.py` is currently **`v == 22`** (keep the two in sync when you add a migration). Resource tables use an integer surrogate `id` PK plus a public string `{entity}_id` (ULID) that APIs and child FKs use.
+**Database:** SQLite (WAL) or PostgreSQL, one shared schema. Migrations are numbered pairs `src/octop/infra/db/migrations/00N_desc.sql` + `00N_desc.pg.sql`; the latest pair is **`028_product_library_asset_descriptions`**, and the version assertion in `tests/unit/db/test_db_pool.py` compares against `MAX_SCHEMA_VERSION`, which is derived from the migrations directory (no manual bump — add the migration pair and the assertion follows). Unreleased schema work folds into the current unreleased `00N` pair, not a new `00N+1`. Resource tables use an integer surrogate `id` PK plus a public string `{entity}_id` (ULID) that APIs and child FKs use.
 
 **Agent scope:** most agent routes nest under `/api/agents/{agent_id}/…`; a few legacy ones (MBTI) still use the `X-Octop-Agent-Id` header. Always load the agent row and check ownership via `_assert_agent_owner(row, user)` (admin bypass).
 
@@ -88,8 +98,11 @@ Layering and hard bans are defined in `AGENTS.md` §5; the short version — dep
 | `desktop/` | Wails v3 desktop client shell + portable packaging (distinct from `infra/desktop/`, which is remote-screen streaming) |
 | `fnos/` | fnOS (飞牛) `.fpk` packaging and install scripts |
 | `scripts/` | Install scripts, CI helpers, release link generation |
+| `remotion/` | Remotion video renderer sources; the wheel force-includes them as `octop/infra/product_library/render_template/` (see `pyproject.toml` `[tool.hatch.build.targets.wheel.force-include]`) |
+| `bootstrap/` | Lightweight GUI download bootstrapper (`Octop-Bootstrap.cmd/.ps1`, `bootstrap.sh`) — no Python runtime bundled |
+| `skills/remotion-video/` | Bundled skill that turns assets into `script.json` for local Remotion rendering |
 | `.cursor/skills/publish/SKILL.md` | Agent-facing release/publish flow — read it before tagging or publishing |
-| `.githooks/pre-commit` | Local commit gate: `make all` + dashboard build (bypass: `SKIP_PRECOMMIT=1`) |
+| `.githooks/pre-commit` | Local commit gate: `make format` + `lint` + `typecheck` + `test-smoke`; dashboard build only when `dashboard/` changed; docs-only commits skip (bypass: `SKIP_PRECOMMIT=1`) |
 | `src/octop/dashboard/` | **Build artifact** — edit `dashboard/` and rebuild, never this directory |
 
 ## Where to look first

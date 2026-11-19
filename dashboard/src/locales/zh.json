@@ -266,6 +266,7 @@
     "TEAM_MEMBER_BUSY": "该专家有进行中的团队任务，请等结束后再调整成员或删除。",
     "TEAM_NOT_SHAREABLE": "当前版本不支持分享团队。",
     "LOCAL_DOWNLOAD_UNAVAILABLE": "仅在本机打开 Octop 时才能保存到系统「下载」文件夹。",
+    "FEATURE_DEPS_MISSING": "可选组件 {{component}} 尚未安装。安装后重试即可。",
     "SKILL_PACKAGE_COPY_DENIED": "该技能包的创建者已禁止复制其中的技能。",
     "SKILL_PACKAGE_DOWNLOAD_DENIED": "该技能包已禁止打包下载。",
     "SKILL_PACKAGE_LOCKED": "此技能复制自锁定策略的技能包，无法在工作区编辑。",
@@ -406,7 +407,11 @@
     "installingHint": "首次下载约需几分钟，请保持客户端打开。组件安装在客户端所在目录，不会修改系统 PATH。",
     "installFailedTitle": "组件安装失败",
     "installFailedHint": "请检查网络与磁盘空间后重试，或联系管理员。",
-    "retryInstall": "重试安装"
+    "retryInstall": "重试安装",
+    "copyDiagnostics": "复制诊断信息",
+    "diagnosticsTitle": "Octop 视频生成环境诊断信息",
+    "diagnosticsCopied": "诊断信息已复制，可直接粘贴给技术支持",
+    "diagnosticsCopyFailed": "复制失败，请手动记录页面上的状态"
   },
   "videoAnalysis": {
     "title": "分析目标视频",
@@ -530,7 +535,22 @@
     "aiDescriptionFailed": "识别失败",
     "aiDescriptionModel": "模型",
     "aiDescriptionDone": "已识别 {{count}} 张图片",
-    "aiDescriptionPartial": "{{failed}} 张图片识别失败，可单独重试"
+    "aiDescriptionPartial": "{{failed}} 张图片识别失败，可单独重试",
+    "importDirectory": "目录导入",
+    "importSelectHint": "选择一个包含产品图片的文件夹（含子目录），系统会逐张识别并按产品自动分组。建议使用 Chrome / Edge 浏览器。",
+    "importSelected": "已选择 {{count}} 个文件",
+    "importCostHint": "识别会消耗模型额度，相同图片不会重复识别。请在确认前复核分组结果。",
+    "importAnalyze": "开始识别（{{count}} 个文件）",
+    "importReviewHint": "复核自动分组：可修改产品名/品类，勾选要排除的图片，或用下拉框把图片移动到其它分组。",
+    "importBack": "重新选择",
+    "importCancel": "取消",
+    "importConfirm": "确认归档",
+    "importDone": "导入完成",
+    "importResult": "新建 {{products}} 个产品，导入 {{assets}} 张图片，跳过 {{duplicates}} 张重复图片",
+    "importSkipped": "已跳过 {{count}} 个非图片文件",
+    "importFailedCount": "{{count}} 张图片识别失败",
+    "importNoGroups": "没有识别到可归档的图片",
+    "importFailed": "导入失败，请稍后重试"
   },
   "videoWizard": {
     "title": "产品视频制作向导",
@@ -742,7 +762,8 @@
       "SAVE_FAILED": "保存视频失败，请重试。",
       "CANCELLED": "制作已取消。",
       "INTERNAL": "生成遇到问题，请重试。",
-      "NO_INSTALLER": "当前客户端未配置组件下载地址，请在桌面客户端打开本页或联系管理员。"
+      "NO_INSTALLER": "当前客户端未配置组件下载地址，请在桌面客户端打开本页或联系管理员。",
+      "ENV_NOT_VERIFIED": "制作组件已安装，但尚未完成验证。请点击「验证制作环境」完成一次简短检查。"
     },
     "previous": "上一步",
     "next": "下一步",
@@ -2427,7 +2448,10 @@
     "historyRetry": "重试",
     "creatingSession": "正在创建会话，请稍候",
     "resizePopup": "调整窗口大小",
-    "unreadMessages": "未读消息"
+    "unreadMessages": "未读消息",
+    "desktopNoAgentsHint": "你的助手应该已经自动创建好了，这次没有成功。请重新加载；若仍然如此，请重新登录一次。",
+    "desktopNoAgentsTitle": "助手没有准备成功",
+    "desktopRetry": "重新加载"
   },
   "tools": {
     "unknown": "未知工具",

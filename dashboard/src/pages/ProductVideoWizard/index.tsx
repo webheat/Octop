@@ -1065,8 +1065,8 @@ export default function ProductVideoWizardPage() {
                   environmentStatus.state === "verifying"
                     ? "videoWizard.environment.verifying"
                     : environmentStatus.state === "installing"
-                      ? "videoWizard.environment.installing"
-                      : "videoWizard.environment.checking",
+                    ? "videoWizard.environment.installing"
+                    : "videoWizard.environment.checking",
                 )}
               </strong>
               {environmentStatus.stage && (

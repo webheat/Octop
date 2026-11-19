@@ -26,7 +26,7 @@
 | PUT | `storyboard` | 编辑/校验草稿并可标记 `confirmed`；非法脚本 422 |
 | GET | `storyboard-package` | 导出已确认草稿为 Studio ZIP；未确认 409 |
 
-另有 `docs/backend-mvp-v01-implementation-brief.md`（任务书）与 `style(video)` 格式化修复（仅 import 排序与换行，无行为变更）。
+另有 `style(video)` 格式化修复（仅 import 排序与换行，无行为变更）。实施任务书已完成历史归档，验收要求以本文 §2 测试证据与 §4 上线验证为准。
 
 ## 2. 后端测试证据
 

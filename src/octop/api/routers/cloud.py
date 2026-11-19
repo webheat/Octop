@@ -31,6 +31,7 @@ from octop.infra.cloud.tencent import (
     require_credential,
     tccli_credential_path_for_user,
 )
+from octop.infra.errors import OctopError
 
 # Same gate as the workbench cloud tab. Admin bypasses inside ``user_has_permission``.
 router = APIRouter(dependencies=[Depends(require_permission("cloud"))])
@@ -210,6 +211,10 @@ async def regions(
         items = await asyncio.to_thread(list_regions, credential)
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"地域查询失败: {exc}") from exc
     return {"regions": items}
@@ -234,6 +239,10 @@ async def instances(
         payload = await asyncio.to_thread(list_instances, credential, targets, nocache=nocache)
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"实例查询失败: {exc}") from exc
     return {
@@ -269,6 +278,10 @@ async def metrics(
         )
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"监控查询失败: {exc}") from exc
 
@@ -293,6 +306,10 @@ async def metrics_batch(
         return await asyncio.to_thread(query_latest_metrics, credential, targets=targets)
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"批量监控查询失败: {exc}") from exc
 
@@ -324,6 +341,10 @@ async def metrics_cluster_trend(
         )
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"集群趋势查询失败: {exc}") from exc
 
@@ -346,6 +367,10 @@ async def action(
         )
     except CloudError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OctopError:
+        # A missing optional component (e.g. the Tencent Cloud SDK) carries the
+        # part id the desktop shell installs on demand — keep it structured.
+        raise
     except Exception as exc:  # noqa: BLE001 - SDK errors vary
         raise HTTPException(status_code=502, detail=f"操作失败: {exc}") from exc
 

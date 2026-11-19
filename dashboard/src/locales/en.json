@@ -266,6 +266,7 @@
     "TEAM_MEMBER_BUSY": "This expert has an in-flight team job. Wait until it finishes.",
     "TEAM_NOT_SHAREABLE": "Teams cannot be shared in this version.",
     "LOCAL_DOWNLOAD_UNAVAILABLE": "Saving to the host Downloads folder is only available when Octop is opened on this computer.",
+    "FEATURE_DEPS_MISSING": "The optional component {{component}} is not installed. Install it and retry.",
     "SKILL_PACKAGE_COPY_DENIED": "The creator of this skill package has disabled copying its skills.",
     "SKILL_PACKAGE_DOWNLOAD_DENIED": "Downloading this skill package is disabled.",
     "SKILL_PACKAGE_LOCKED": "This skill was copied from a locked skill package and cannot be edited in the workspace.",
@@ -406,7 +407,11 @@
     "installingHint": "The first download takes a few minutes. Keep the client open. Components install next to the client and never modify system PATH.",
     "installFailedTitle": "Component installation failed",
     "installFailedHint": "Check your network and disk space, then try again or contact your administrator.",
-    "retryInstall": "Retry install"
+    "retryInstall": "Retry install",
+    "copyDiagnostics": "Copy diagnostics",
+    "diagnosticsTitle": "Octop video environment diagnostics",
+    "diagnosticsCopied": "Diagnostics copied — paste them to support",
+    "diagnosticsCopyFailed": "Copy failed; please note the status shown on the page"
   },
   "videoAnalysis": {
     "title": "Analyze target video",
@@ -530,7 +535,22 @@
     "aiDescriptionFailed": "AI description failed",
     "aiDescriptionModel": "Model",
     "aiDescriptionDone": "Described {{count}} images",
-    "aiDescriptionPartial": "{{failed}} images failed; retry them individually"
+    "aiDescriptionPartial": "{{failed}} images failed; retry them individually",
+    "importDirectory": "Import directory",
+    "importSelectHint": "Choose a folder of product images (subfolders included). Each image is described and grouped by product. Chrome / Edge recommended.",
+    "importSelected": "{{count}} files selected",
+    "importCostHint": "Recognition uses model quota. Identical images are only processed once. Review the groups before confirming.",
+    "importAnalyze": "Analyze ({{count}} files)",
+    "importReviewHint": "Review the groups: edit product name/category, uncheck images to exclude, or use the dropdown to move an image to another group.",
+    "importBack": "Reselect",
+    "importCancel": "Cancel",
+    "importConfirm": "Confirm & archive",
+    "importDone": "Import complete",
+    "importResult": "Created {{products}} products, imported {{assets}} images, skipped {{duplicates}} duplicates",
+    "importSkipped": "Skipped {{count}} non-image files",
+    "importFailedCount": "{{count}} images failed recognition",
+    "importNoGroups": "No images could be grouped",
+    "importFailed": "Import failed, please try again"
   },
   "videoWizard": {
     "title": "Product video wizard",
@@ -742,7 +762,8 @@
       "SAVE_FAILED": "Could not save the video. Please retry.",
       "CANCELLED": "Video creation was cancelled.",
       "INTERNAL": "Video generation encountered a problem. Please retry.",
-      "NO_INSTALLER": "This client has no component download URL configured. Open this page in the desktop client or contact your administrator."
+      "NO_INSTALLER": "This client has no component download URL configured. Open this page in the desktop client or contact your administrator.",
+      "ENV_NOT_VERIFIED": "The production components are installed but have not been verified yet. Click \"Verify environment\" to run a short check."
     },
     "previous": "Previous",
     "next": "Next",
@@ -2427,7 +2448,10 @@
     "historyRetry": "Retry",
     "creatingSession": "Creating session…",
     "resizePopup": "Resize window",
-    "unreadMessages": "Unread messages"
+    "unreadMessages": "Unread messages",
+    "desktopNoAgentsHint": "Your assistant is created for you automatically, but it did not make it this time. Reload to try again — if that does not help, sign in again.",
+    "desktopNoAgentsTitle": "Your assistant is not ready",
+    "desktopRetry": "Reload"
   },
   "tools": {
     "unknown": "Unknown tool",

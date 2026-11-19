@@ -67,6 +67,14 @@ async def exchange_login_code_response(code: str, server: Any) -> dict[str, Any]
         user = await _service(server).exchange_login_code(code)
     except ValueError as exc:
         raise _bad_request(exc) from exc
+    # Desktop shells sign in without the setup wizard, so make sure an SSO
+    # account still owns a usable assistant. Idempotent and best-effort:
+    # a failure must never block login.
+    from octop.infra.agents.experts.default_agent import (  # noqa: PLC0415
+        try_bootstrap_default_agent,
+    )
+
+    await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
     secret = server.services.secret_repo.get("jwt")
     ttl = server.services.config.access_token_ttl_seconds
     row = server.services.user_repo.get(user.id)

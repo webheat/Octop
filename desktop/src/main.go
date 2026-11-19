@@ -87,6 +87,10 @@ type App struct {
 	pendingURL     string
 	video          *videoManager
 	videoNonce     string
+	// dashboardBase is the URL the shell is showing. The runtime bridge only
+	// talks to that origin.
+	dashboardBase string
+	runtimeNonce  string
 
 	// minimalLandingPath is the product-library path the shell keeps the
 	// browser on while minimal mode is enabled ("" when disabled).
@@ -352,6 +356,9 @@ func (a *App) showDashboard(base string) {
 	if a.video == nil {
 		a.video = newVideoManager(base)
 	}
+	a.mu.Lock()
+	a.dashboardBase = base
+	a.mu.Unlock()
 	a.scheduleDragOverlay()
 	s := a.store.get()
 	go func() {
@@ -419,6 +426,7 @@ func (a *App) installDragOverlay() {
 	a.window.ExecJS(dragOverlayJS())
 	a.window.ExecJS(fileDropJS())
 	a.installVideoBridge()
+	a.installRuntimeBridge()
 	a.installMinimalMode()
 	a.installDesktopFrontendMarker()
 }
@@ -460,6 +468,21 @@ func (a *App) installVideoBridge() {
 		return
 	}
 	a.window.ExecJS(videoBridgeJS(a.video.base, a.videoNonce))
+}
+
+// installRuntimeBridge exposes the optional runtime shards to the page. The
+// page asks for a part when the backend reports a missing optional component.
+func (a *App) installRuntimeBridge() {
+	if a.window == nil || a.runtimeNonce == "" {
+		return
+	}
+	a.mu.Lock()
+	base := a.dashboardBase
+	a.mu.Unlock()
+	if base == "" {
+		return
+	}
+	a.window.ExecJS(runtimeBridgeJS(base, a.runtimeNonce))
 }
 
 func (a *App) scheduleDragOverlay() {
@@ -507,6 +530,7 @@ func main() {
 		sleep: &sleepGuard{},
 	}
 	api.videoNonce, _ = randomToken()
+	api.runtimeNonce, _ = randomToken()
 
 	app := application.New(application.Options{
 		Name:        "Octop",
@@ -534,6 +558,7 @@ func main() {
 	attachOpenURLEventListener(app, api.OpenExternal)
 	attachFileDropEventListener(app, api)
 	attachVideoEventListener(app, api, api.videoNonce)
+	attachRuntimeEventListener(app, api, api.runtimeNonce)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
 		applyAppIcon(app)
 		lock.listen(func() { application.InvokeAsync(api.showWindow) })

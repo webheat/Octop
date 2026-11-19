@@ -242,9 +242,10 @@ New agents additionally keep system-scoped files under `{workspace}/.octop/` (e.
 **Mount prefix:** `config.json` → `base_path` (env `OCTOP_BASE_PATH`) mounts the whole app under a URL path prefix (e.g. `/videogen`); the dashboard must be built with the same prefix (`BASE_URL=/videogen npm run build` in `dashboard/`). See `docs/configuration.md`.
 
 **Database:** SQLite and PostgreSQL share one schema. Add or change tables via a numbered pair
-`infra/db/migrations/00N_description.sql` **and** `00N_description.pg.sql`, then bump the
-version assertion in `tests/unit/db/test_db_pool.py` (currently `v == 22`). Rebuilds that SQLite
-cannot express as `ALTER` live in `infra/db/migrate.py` helpers and must stay idempotent.
+`infra/db/migrations/00N_description.sql` **and** `00N_description.pg.sql`. The version assertion in
+`tests/unit/db/test_db_pool.py` compares against `MAX_SCHEMA_VERSION`, which is derived from the
+migrations directory — adding the pair is enough, there is no manual bump to keep in sync.
+Rebuilds that SQLite cannot express as `ALTER` live in `infra/db/migrate.py` helpers and must stay idempotent.
 
 Unreleased schema work on `develop` **folds into the current unreleased `00N`**, not a new
 `00N+1`. Only cut a new number after that version has shipped (or after a local DB at `N` would

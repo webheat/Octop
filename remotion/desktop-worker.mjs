@@ -12,6 +12,12 @@ const RUNTIME_SCHEMA = "octop-desktop-video-runtime/1";
 const NODE_EXECUTABLE = process.platform === "win32" ? "node.exe" : "node";
 const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
+// Diagnostics go to stderr on purpose: stdout carries the JSONL protocol the
+// desktop shell parses, while stderr is captured verbatim into the shell's
+// log file. That is what lets a support report say *why* a check failed
+// instead of only that it did.
+const debug = (message) => process.stderr.write(`[worker] ${message}\n`);
+
 function parseArgs(argv) {
   const result = { mode: null, cache: process.env.OCTOP_DESKTOP_VIDEO_CACHE ?? null, project: null, out: null };
   for (let i = 0; i < argv.length; i += 1) {
@@ -57,7 +63,16 @@ function sourceFingerprint(runtimeDir, browserPath) {
   const files = ["runtime.json", "package.json", "package-lock.json", "desktop-worker.mjs", "render.mjs", "project.mjs"];
   const addTree = (relative) => {
     const full = path.join(runtimeDir, relative);
-    for (const entry of fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    // A missing tree means the runtime is incomplete. Returning null keeps
+    // the check reporting "not verified" instead of crashing the worker with
+    // an ENOENT stack trace.
+    let entries;
+    try {
+      entries = fs.readdirSync(full, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const child = path.join(relative, entry.name);
       if (entry.isDirectory()) addTree(child);
       else if (entry.isFile()) files.push(child);
@@ -79,17 +94,31 @@ function sourceFingerprint(runtimeDir, browserPath) {
 async function prerequisites(cache) {
   const dir = runtimeDirectory();
   const runtime = readRuntime(dir);
-  if (!runtime) return { errorCode: "RUNTIME_MISSING", requiresInstall: true };
+  if (!runtime) {
+    debug(`runtime manifest missing or invalid under ${dir}`);
+    return { errorCode: "RUNTIME_MISSING", requiresInstall: true };
+  }
   try {
     await import("@remotion/bundler");
     await import("@remotion/renderer");
-  } catch {
+  } catch (error) {
+    debug(`the Remotion packages could not be imported: ${error?.code ?? error?.message ?? error}`);
     return { errorCode: "RUNTIME_MISSING", requiresInstall: true };
   }
   const { detectBrowser } = await import("./render.mjs");
   const browserPath = detectBrowser();
-  if (!browserPath) return { errorCode: "BROWSER_MISSING", requiresInstall: true };
-  return { dir, runtime, browserPath, fingerprint: sourceFingerprint(dir, browserPath), cache };
+  if (!browserPath) {
+    debug(`no usable Chromium was found (runtime dir ${dir})`);
+    return { errorCode: "BROWSER_MISSING", requiresInstall: true };
+  }
+  // A fingerprint that cannot be computed means the runtime tree is
+  // incomplete (missing sources). The tree is then treated as unverified
+  // rather than as a missing component: the sources are present on a real
+  // installation, and reporting "install again" for a partial tree would
+  // send the user into a reinstall loop.
+  const fingerprint = sourceFingerprint(dir, browserPath);
+  debug(`runtime ok: dir=${dir} browser=${browserPath} fingerprint=${fingerprint ? "computed" : "unavailable"}`);
+  return { dir, runtime, browserPath, fingerprint, cache };
 }
 
 function environment(status, stage = null, progress = null) {
@@ -128,7 +157,13 @@ async function checkEnvironment(cacheArg) {
   if (stamp?.schema === "octop-desktop-video-ready/1" && stamp.fingerprint === ready.fingerprint) {
     environment({ state: "ready" });
   } else {
-    environment({ state: "needs_setup" });
+    // The components are in place but no successful local render has been
+    // recorded for this exact build. That is a *verification* gap, not a
+    // missing component: reporting it as "needs_setup" without an error code
+    // made the UI show "需要安装" forever, even right after a successful
+    // install. requiresInstall=false tells the UI to offer verification
+    // instead of another download.
+    environment({ state: "needs_setup", errorCode: "ENV_NOT_VERIFIED", requiresInstall: false });
   }
   return 0;
 }

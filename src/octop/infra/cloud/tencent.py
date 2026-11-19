@@ -24,20 +24,88 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlencode
 
 from cryptography.fernet import Fernet
-from tencentcloud.common.credential import Credential
-from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
-from tencentcloud.common.profile.client_profile import ClientProfile
-from tencentcloud.common.profile.http_profile import HttpProfile
-from tencentcloud.cvm.v20170312 import cvm_client
-from tencentcloud.cvm.v20170312 import models as cvm_models
-from tencentcloud.monitor.v20180724 import models as monitor_models
-from tencentcloud.monitor.v20180724 import monitor_client
+
+from octop.infra.errors import OctopError
+from octop.infra.feature_deps import import_optional, missing_feature_error
+
+if TYPE_CHECKING:
+    from tencentcloud.common.credential import Credential
+    from tencentcloud.common.profile.client_profile import ClientProfile
 
 logger = logging.getLogger(__name__)
+
+# The SDK is an optional component (``octop[tencentcloud]``) and ships as the
+# ``deps-tencent`` runtime shard. The shell maps the part id back to a download.
+_TENCENT_FEATURE = "tencent"
+_TENCENT_PART = "deps-tencent"
+_TENCENT_COMPONENT = "octop[tencentcloud]"
+
+
+def _missing_sdk(exc: ImportError) -> OctopError:
+    """The optional Tencent Cloud SDK is not installed."""
+    return missing_feature_error(
+        _TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+        modules=("tencentcloud",),
+        detail=str(exc),
+    )
+
+
+def _cvm_client() -> Any:
+    """Import the optional Tencent Cloud SDK lazily (``octop[tencentcloud]``).
+
+    Keeping the SDK out of the core dependencies removes ~18MB from the
+    portable runtime; only the Workbench cloud tab touches it.
+    """
+    return import_optional(
+        "tencentcloud.cvm.v20170312.cvm_client",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
+
+
+def _cvm_models() -> Any:
+    return import_optional(
+        "tencentcloud.cvm.v20170312.models",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
+
+
+def _monitor_client() -> Any:
+    return import_optional(
+        "tencentcloud.monitor.v20180724.monitor_client",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
+
+
+def _monitor_models() -> Any:
+    return import_optional(
+        "tencentcloud.monitor.v20180724.models",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+    )
+
+
+def _sdk_exception() -> type[Exception]:
+    exception = import_optional(
+        "tencentcloud.common.exception.tencent_cloud_sdk_exception",
+        feature=_TENCENT_FEATURE,
+        part=_TENCENT_PART,
+        component=_TENCENT_COMPONENT,
+        attr="TencentCloudSDKException",
+    )
+    return cast(type[Exception], exception)
 
 
 def _write_private(path: Path, data: bytes) -> None:
@@ -501,12 +569,23 @@ def require_credential(store: CloudCredentialStore, user_id: int) -> CloudCreden
 
 
 def _profile(timeout_seconds: int = 20) -> ClientProfile:
+    try:
+        from tencentcloud.common.profile.client_profile import ClientProfile
+        from tencentcloud.common.profile.http_profile import HttpProfile
+    except ImportError as exc:
+        raise _missing_sdk(exc) from exc
+
     http = HttpProfile()
     http.reqTimeout = timeout_seconds
     return ClientProfile(httpProfile=http)
 
 
 def _credential_of(credential: CloudCredential) -> Credential:
+    try:
+        from tencentcloud.common.credential import Credential
+    except ImportError as exc:
+        raise _missing_sdk(exc) from exc
+
     return Credential(credential.secret_id, credential.secret_key, credential.token)
 
 
@@ -528,8 +607,8 @@ def list_regions(credential: CloudCredential, *, nocache: bool = False) -> list[
             hit = _REGION_CACHE.get(key)
             if hit and time.time() - hit[0] <= REGION_CACHE_TTL_S:
                 return hit[1]
-    client = cvm_client.CvmClient(_credential_of(credential), "ap-guangzhou", _profile())
-    response = client.DescribeRegions(cvm_models.DescribeRegionsRequest())
+    client = _cvm_client().CvmClient(_credential_of(credential), "ap-guangzhou", _profile())
+    response = client.DescribeRegions(_cvm_models().DescribeRegionsRequest())
     regions = [
         {"id": str(item.Region), "name": str(item.RegionName or item.Region)}
         for item in (response.RegionSet or [])
@@ -553,7 +632,7 @@ def _list_region_instances(
     for attempt in range(attempts):
         try:
             return _list_region_instances_once(credential, region)
-        except TencentCloudSDKException as exc:
+        except _sdk_exception() as exc:
             if attempt + 1 >= attempts:
                 _LOGGER.warning("DescribeInstances failed in %s: %s", region, exc)
                 return []
@@ -566,10 +645,10 @@ def _list_region_instances(
 
 def _list_region_instances_once(credential: CloudCredential, region: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    client = cvm_client.CvmClient(_credential_of(credential), region, _profile())
+    client = _cvm_client().CvmClient(_credential_of(credential), region, _profile())
     offset = 0
     while True:
-        request = cvm_models.DescribeInstancesRequest()
+        request = _cvm_models().DescribeInstancesRequest()
         request.Offset = offset
         request.Limit = 100
         response = client.DescribeInstances(request)
@@ -698,8 +777,8 @@ def _fetch_metric_series(
     key: str,
     metric: str,
 ) -> tuple[str, list[dict[str, float]]]:
-    client = monitor_client.MonitorClient(_credential_of(credential), region, _profile())
-    request = monitor_models.GetMonitorDataRequest()
+    client = _monitor_client().MonitorClient(_credential_of(credential), region, _profile())
+    request = _monitor_models().GetMonitorDataRequest()
     request.Namespace = "QCE/CVM"
     request.MetricName = metric
     request.Period = period
@@ -708,7 +787,7 @@ def _fetch_metric_series(
     request.Instances = [{"Dimensions": [{"Name": "InstanceId", "Value": instance_id}]}]
     try:
         response = client.GetMonitorData(request)
-    except TencentCloudSDKException as exc:
+    except _sdk_exception() as exc:
         # A wrong metric name used to fail silently and render as "no data".
         _LOGGER.warning("cloud metric %s (%s) failed: %s", key, metric, exc)
         return key, []
@@ -801,8 +880,8 @@ def _get_monitor_series(
     if not instance_ids:
         return {}
     if client is None:
-        client = monitor_client.MonitorClient(_credential_of(credential), region, _profile())
-    request = monitor_models.GetMonitorDataRequest()
+        client = _monitor_client().MonitorClient(_credential_of(credential), region, _profile())
+    request = _monitor_models().GetMonitorDataRequest()
     request.Namespace = "QCE/CVM"
     request.MetricName = metric
     request.Period = period
@@ -814,7 +893,7 @@ def _get_monitor_series(
     ]
     try:
         response = client.GetMonitorData(request)
-    except TencentCloudSDKException as exc:
+    except _sdk_exception() as exc:
         if len(instance_ids) == 1 or depth >= 6:
             _LOGGER.debug("monitor %s %s skipped: %s", metric, instance_ids[0], exc)
             return {}
@@ -1052,9 +1131,9 @@ def query_cluster_trend(
 
 
 _ACTIONS = {
-    "start": (cvm_models.StartInstancesRequest, "StartInstances"),
-    "stop": (cvm_models.StopInstancesRequest, "StopInstances"),
-    "reboot": (cvm_models.RebootInstancesRequest, "RebootInstances"),
+    "start": ("StartInstancesRequest", "StartInstances"),
+    "stop": ("StopInstancesRequest", "StopInstances"),
+    "reboot": ("RebootInstancesRequest", "RebootInstances"),
 }
 
 
@@ -1068,8 +1147,9 @@ def instance_action(
     spec = _ACTIONS.get(action)
     if spec is None:
         raise CloudError(f"不支持的操作: {action}")
-    request_cls, _name = spec
-    client = cvm_client.CvmClient(_credential_of(credential), region, _profile())
+    request_name, _name = spec
+    request_cls = getattr(_cvm_models(), request_name)
+    client = _cvm_client().CvmClient(_credential_of(credential), region, _profile())
     request = request_cls()
     request.InstanceIds = [instance_id]
     if action == "stop":

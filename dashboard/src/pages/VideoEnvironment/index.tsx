@@ -7,11 +7,21 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Progress, Space, Spin, Typography } from "antd";
-import { ArrowLeft, Download, RefreshCw } from "lucide-react";
+import {
+  Alert,
+  Button,
+  Card,
+  Progress,
+  Space,
+  Spin,
+  Typography,
+  message,
+} from "antd";
+import { ArrowLeft, Copy, Download, RefreshCw } from "lucide-react";
 import PageShell from "../../layouts/PageShell";
 import { useDesktopVideoJobs } from "../../context/DesktopVideoJobsContext";
 import { useDesktopMinimalMode } from "../../hooks/useDesktopMinimalMode";
+import { copyText } from "../../utils/copyText";
 
 const { Text } = Typography;
 
@@ -34,6 +44,9 @@ export default function VideoEnvironmentPage() {
     installEnvironment,
   } = useDesktopVideoJobs();
   const [busy, setBusy] = useState(false);
+
+  const { state, stage, progress, errorCode, requiresInstall } =
+    environmentStatus;
 
   useEffect(() => {
     if (!environmentSupported || environmentStatus.state !== "unknown") return;
@@ -73,20 +86,51 @@ export default function VideoEnvironmentPage() {
     }
   }, [verifyEnvironment]);
 
-  const { state, stage, progress, errorCode, requiresInstall } =
-    environmentStatus;
+  // Copy the current environment snapshot for a support report. The desktop
+  // shell keeps the authoritative log on disk; this is the quick version a
+  // user can paste into a ticket without hunting for the log file.
+  const copyDiagnostics = useCallback(async () => {
+    const payload = [
+      t("videoEnvironment.diagnosticsTitle"),
+      `state=${state}`,
+      `stage=${stage ?? "-"}`,
+      `code=${errorCode ?? "-"}`,
+      `requiresInstall=${requiresInstall === true}`,
+      `progress=${progress ?? "-"}`,
+      `checkedAt=${environmentStatus.checkedAt ?? "-"}`,
+      `bridge=${environmentSupported}`,
+      `userAgent=${navigator.userAgent}`,
+    ].join("\n");
+    const ok = await copyText(payload);
+    if (ok) message.success(t("videoEnvironment.diagnosticsCopied"));
+    else message.error(t("videoEnvironment.diagnosticsCopyFailed"));
+  }, [
+    environmentStatus.checkedAt,
+    environmentSupported,
+    errorCode,
+    progress,
+    requiresInstall,
+    stage,
+    state,
+    t,
+  ]);
+
   const installing = environmentSupported && state === "installing";
   // A failed install also carries requiresInstall=true. Split it out so the
   // concrete error (DOWNLOAD_FAILED / PACKAGE_INVALID / ENV_DISK_FULL / …)
   // stays visible and the retry action installs again rather than verifies.
   const installFailed =
     environmentSupported && state === "failed" && requiresInstall === true;
-  const needsInstall =
-    !environmentSupported ||
-    (state === "needs_setup" ||
-      (!installing && !installFailed && requiresInstall === true) ||
-      errorCode === "RUNTIME_MISSING" ||
-      errorCode === "BROWSER_MISSING");
+  // The components are missing only when the native side says so. A
+  // needs_setup without that flag means the opposite: everything is in place
+  // but nobody rendered a frame yet, so the fix is a verification, not
+  // another download. Showing "需要安装" there sent users into an endless
+  // reinstall loop right after a perfectly good install.
+  const componentsMissing =
+    errorCode === "RUNTIME_MISSING" ||
+    errorCode === "BROWSER_MISSING" ||
+    (requiresInstall === true && !installing && !installFailed);
+  const needsInstall = !environmentSupported || componentsMissing;
   const checking =
     environmentSupported &&
     (state === "checking" || state === "verifying" || state === "unknown");
@@ -209,6 +253,29 @@ export default function VideoEnvironmentPage() {
         </Space>
       </>
     );
+  } else if (state === "needs_setup" && !needsInstall) {
+    // The components are installed but no successful render has been recorded
+    // for this build yet. The action here is a verification, not a download.
+    statusBody = (
+      <>
+        <Alert
+          type="info"
+          showIcon
+          message={t("videoEnvironment.verifyTitle")}
+          description={t("videoEnvironment.verifyHint")}
+        />
+        <Space wrap style={{ marginTop: 20 }}>
+          <Button
+            type="primary"
+            loading={busy}
+            disabled={busy}
+            onClick={() => void verify()}
+          >
+            {t("videoEnvironment.verify")}
+          </Button>
+        </Space>
+      </>
+    );
   } else if (checking) {
     statusBody = (
       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -297,6 +364,12 @@ export default function VideoEnvironmentPage() {
             onClick={() => void recheck()}
           >
             {t("videoEnvironment.recheck")}
+          </Button>
+          <Button
+            icon={<Copy size={14} />}
+            onClick={() => void copyDiagnostics()}
+          >
+            {t("videoEnvironment.copyDiagnostics")}
           </Button>
         </Space>
       }

@@ -18,6 +18,7 @@ import { message as antMessage } from "@/utils/antdMessage";
 import { showConfirmModal } from "../../utils/confirmModal";
 import PlanReadyCard from "./components/PlanReadyCard";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { useIsDesktopShell } from "../../hooks/useIsDesktopShell";
 import { useHitlEnabled } from "../../hooks/useHitlEnabled";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { navAllowed, userCan } from "../../utils/permissions";
@@ -239,7 +240,24 @@ function ChatPageInner() {
     ? t("chat.agentProfile.openTeam")
     : t("chat.agentProfile.open");
   const ProfileIcon = isTeamChat ? Users : GraduationCap;
-  const noAgents = !agentsLoading && agents.length === 0;
+  /**
+   * The desktop shell is a plain chat surface: sign-in ensures the account owns
+   * an assistant, so "no agents" is not something the user is meant to fix by
+   * opening the console. It still has to be told apart from "the assistant is
+   * still starting" — the SSO bootstrap creates it in `starting` and the
+   * runtime only reports `running` after the harness comes up.
+   *
+   * Browser behaviour is untouched: there the console entries stay, so an
+   * account without an expert still gets the "create your first expert" wall.
+   */
+  const desktopShell = useIsDesktopShell();
+  const agentsEmpty = !agentsLoading && agents.length === 0;
+  const desktopAgentProvisioning =
+    desktopShell &&
+    !agentsLoading &&
+    agents.length > 0 &&
+    !agents.some((agent) => isAgentChatReady(agent.state, agent));
+  const noAgents = agentsEmpty && !desktopAgentProvisioning;
 
   // Sidebar only lists "enabled" experts (harness running). Stopped / failed
   // experts are hidden so the nav stays focused on agents that can actually
@@ -1618,7 +1636,8 @@ function ChatPageInner() {
                 <AgentNotReadyScreen
                   agent={activeAgent}
                   noAgents={noAgents}
-                  loading={agentsLoading}
+                  desktopShell={desktopShell}
+                  loading={agentsLoading || desktopAgentProvisioning}
                   canConfigureModels={canConfigureModels}
                 />
               ) : showWelcome && modelsReady && availableModels.length === 0 ? (

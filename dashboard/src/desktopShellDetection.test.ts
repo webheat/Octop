@@ -5,6 +5,7 @@ import {
   isDesktopShellPage,
   isKnownDesktopProfile,
   markDesktopProfile,
+  resolveDesktopShellContext,
   shouldSkipServiceWorker,
   whenDesktopShellDetected,
 } from "./desktopShellDetection";
@@ -178,5 +179,44 @@ describe("whenDesktopShellDetected", () => {
     whenDesktopShellDetected(onDetected);
     await vi.advanceTimersByTimeAsync(13_000);
     expect(onDetected).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveDesktopShellContext", () => {
+  beforeEach(() => {
+    clearBridges();
+    setSearch("");
+    window.localStorage.clear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    clearBridges();
+    setSearch("");
+    window.localStorage.clear();
+    vi.useRealTimers();
+  });
+
+  it("resolves true right away when the shell flag is on the URL", async () => {
+    setSearch("?desktop=1");
+    await expect(resolveDesktopShellContext()).resolves.toBe(true);
+  });
+
+  it("resolves true right away for a known desktop profile", async () => {
+    markDesktopProfile();
+    await expect(resolveDesktopShellContext()).resolves.toBe(true);
+  });
+
+  it("resolves true once the shell injects its marker later", async () => {
+    const pending = resolveDesktopShellContext();
+    (window as BridgeHost).octopDesktopShell = true;
+    await vi.advanceTimersByTimeAsync(400);
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it("resolves false in a plain browser instead of hanging", async () => {
+    const pending = resolveDesktopShellContext();
+    await vi.advanceTimersByTimeAsync(13_000);
+    await expect(pending).resolves.toBe(false);
   });
 });

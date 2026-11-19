@@ -89,7 +89,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 }
 
-
 function normalizeViteBase(raw: string | undefined): string {
   const value = (raw || "/").trim() || "/";
   if (value === "/") return "/";

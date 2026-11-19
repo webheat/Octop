@@ -5,6 +5,7 @@ import {
   renewDesktopSession,
 } from "./desktopSession";
 import i18n from "../i18n";
+import { installRuntimePart, missingRuntimePart } from "./runtimeDeps";
 import { markNavigatingAway } from "../utils/reloadOnStaleChunk";
 import { stripBase, withBase } from "../utils/basePath";
 
@@ -428,6 +429,23 @@ export async function request<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  return requestWithRuntimeParts<T>(path, options, true);
+}
+
+/**
+ * The request itself.
+ *
+ * `allowRuntimePart` guards the on-demand install of an optional runtime
+ * part: when the server reports that a feature misses its component, the
+ * desktop shell installs the shard and the request is repeated once. The
+ * retry happens at most once, so a part that does not fix the feature does
+ * not turn into a loop.
+ */
+async function requestWithRuntimeParts<T>(
+  path: string,
+  options: RequestInit,
+  allowRuntimePart: boolean,
+): Promise<T> {
   assertNotSetupLocked(path);
 
   const url = getApiUrl(path);
@@ -459,6 +477,12 @@ export async function request<T = unknown>(
       );
     }
     const text = await response.text().catch(() => "");
+    if (allowRuntimePart) {
+      const part = missingRuntimePart(text);
+      if (part && (await installRuntimePart(part))) {
+        return requestWithRuntimeParts<T>(path, options, false);
+      }
+    }
     throw new Error(
       `Request failed: ${response.status} ${response.statusText}${
         text ? ` - ${text}` : ""

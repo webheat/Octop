@@ -31,7 +31,6 @@ const DESKTOP_QUERY_FLAG = "desktop";
 const DESKTOP_PROFILE_KEY = "octop.desktopShell";
 
 const POLL_INTERVAL_MS = 200;
-const POLL_TIMEOUT_MS = 12_000;
 
 /**
  * True when the URL carries the shell's `?desktop=1` flag.
@@ -42,7 +41,10 @@ const POLL_TIMEOUT_MS = 12_000;
 export function hasDesktopUrlFlag(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return new URLSearchParams(window.location.search).get(DESKTOP_QUERY_FLAG) === "1";
+    return (
+      new URLSearchParams(window.location.search).get(DESKTOP_QUERY_FLAG) ===
+      "1"
+    );
   } catch {
     return false;
   }
@@ -83,6 +85,18 @@ export function isDesktopShellPage(): boolean {
 }
 
 /**
+ * True when the page runs inside the Octop desktop shell.
+ *
+ * The three signals become available at different moments, so all of them are
+ * combined: the URL flag is there on the very first navigation, the persisted
+ * profile marker survives later navigations that lost the flag, and the
+ * injected bridges identify older shells as well.
+ */
+export function isDesktopShellContext(): boolean {
+  return hasDesktopUrlFlag() || isKnownDesktopProfile() || isDesktopShellPage();
+}
+
+/**
  * True when the page must not register a Service Worker.
  *
  * This is the single decision the entry point needs, and it deliberately
@@ -91,8 +105,16 @@ export function isDesktopShellPage(): boolean {
  * once the shell has spoken).
  */
 export function shouldSkipServiceWorker(): boolean {
-  return hasDesktopUrlFlag() || isKnownDesktopProfile() || isDesktopShellPage();
+  return isDesktopShellContext();
 }
+
+/**
+ * How long the shell detection waits for a bridge before giving up.
+ *
+ * Exposed so callers that must decide something even when no bridge ever
+ * arrives (a plain browser) can use the same window.
+ */
+export const DESKTOP_DETECT_TIMEOUT_MS = 12_000;
 
 /**
  * Run `onDetected` once the page is known to run inside the desktop shell.
@@ -120,9 +142,41 @@ export function whenDesktopShellDetected(onDetected: () => void): () => void {
   }, POLL_INTERVAL_MS);
   const stop = window.setTimeout(() => {
     window.clearInterval(poll);
-  }, POLL_TIMEOUT_MS);
+  }, DESKTOP_DETECT_TIMEOUT_MS);
   return () => {
     window.clearInterval(poll);
     window.clearTimeout(stop);
   };
+}
+
+/**
+ * Decide whether the page runs inside the desktop shell, waiting for the
+ * shell to speak when it has not yet identified itself.
+ *
+ * The shell injects its bridges shortly after the page starts loading, so a
+ * caller that asks too early can mistake a desktop client for a browser. This
+ * helper resolves `true` as soon as a shell signal appears and `false` once
+ * the detection window expires without one.
+ *
+ * Unlike `whenDesktopShellDetected`, the promise always settles — a plain
+ * browser never gets a bridge, and that case must resolve to `false` rather
+ * than hang.
+ */
+export function resolveDesktopShellContext(): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  if (isDesktopShellContext()) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const settle = (value: boolean) => {
+      if (done) return;
+      done = true;
+      window.clearInterval(poll);
+      window.clearTimeout(stop);
+      resolve(value);
+    };
+    const poll = window.setInterval(() => {
+      if (isDesktopShellContext()) settle(true);
+    }, POLL_INTERVAL_MS);
+    const stop = window.setTimeout(() => settle(false), DESKTOP_DETECT_TIMEOUT_MS);
+  });
 }

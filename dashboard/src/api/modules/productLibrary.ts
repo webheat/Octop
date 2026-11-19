@@ -41,6 +41,52 @@ export interface ProductAsset
   active: number;
 }
 
+/** One image in a directory-import analysis result. */
+export interface ImportItem {
+  index: number;
+  filename: string;
+  confidence: number;
+  description: string;
+  tags: string[];
+  duplicate: boolean;
+}
+
+/** A suggested product group produced by directory import. */
+export interface ImportGroup {
+  key: string;
+  suggested_name: string;
+  category: string;
+  items: ImportItem[];
+}
+
+export interface ImportNotice {
+  filename: string;
+  reason: string;
+}
+
+export interface ImportAnalysis {
+  job_id: string;
+  total: number;
+  groups: ImportGroup[];
+  skipped: ImportNotice[];
+  failed: ImportNotice[];
+}
+
+export interface ImportCommitGroup {
+  product_id: string | null;
+  name: string;
+  category: string;
+  item_indices: number[];
+}
+
+export interface ImportResult {
+  created_products: number;
+  reused_products: number;
+  imported_assets: number;
+  skipped_duplicates: number;
+  failed: ImportNotice[];
+}
+
 export interface ProductProject {
   id: string;
   product_id: string;
@@ -155,6 +201,23 @@ export const productLibraryApi = {
       body,
     );
   },
+  analyzeImport: (files: File[]) => {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file));
+    return requestUpload<ImportAnalysis>(
+      "/product-library/imports/analyze",
+      body,
+    );
+  },
+  commitImport: (body: {
+    job_id: string;
+    groups: ImportCommitGroup[];
+    exclude_indices: number[];
+  }) =>
+    request<ImportResult>("/product-library/imports/commit", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   updateAsset: (
     id: string,
     body: {

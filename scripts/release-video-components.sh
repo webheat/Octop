@@ -18,6 +18,15 @@
 #       --host 1.14.182.208 --host 175.178.33.107 \
 #       --upload
 #   # SSH 端口默认 13122，Web 根目录默认 /opt/dw.mengxa.com（可用环境变量覆盖）
+#   # 推荐：manifest 内每个 part 的 urls[] 写「https 域名(主) + http 域名(兜底) + IP(末兜底)」，
+#   # 客户端 bootstrap 逐个探测。实测 dw 四节点 HTTPS 配置不一（.87 SNI 错、8.134 证书过期、
+#   # 仅 .107/.1.14 的 https 可用；HTTP 则 .87 可用），单用任一 scheme 都会命中坏节点：
+#   #   ./scripts/release-video-components.sh \
+#   #       --base-url https://dw.mengxa.com/video-components/1.4.0/win-x64 \
+#   #       --mirror http://dw.mengxa.com/video-components/1.4.0/win-x64 \
+#   #       --mirror http://175.178.192.87/video-components/1.4.0/win-x64 \
+#   #       --host ... --upload
+#   # 客户端注入同样用逗号分隔多 URL：defaultVideoComponentsURL=https域名,http域名,IP
 #
 #   # 3) 只校验远端已发布的包（逐台 SSH 比对 sha256；不打包不上传）
 #   ./scripts/release-video-components.sh --base-url ... --verify-only --host ...
@@ -66,6 +75,9 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET="${OCTOP_VC_TARGET:-win-x64}"
+# kind=component (video core/browser zips, the original behaviour) or
+# kind=runtime (portable runtime tar.gz shards for slim clients).
+KIND="${OCTOP_VC_KIND:-component}"
 OUT_DIR="${OCTOP_VC_OUT_DIR:-$REPO_ROOT/dist/video-components}"
 RUNTIME_DIR="${OCTOP_VC_RUNTIME_DIR:-$REPO_ROOT/desktop/src/video-runtime}"
 DEPLOY_USER="${OCTOP_VC_DEPLOY_USER:-root}"
@@ -74,6 +86,7 @@ CURL_NOPROXY="${OCTOP_VC_CURL_NOPROXY:-1}"
 
 BASE_URL=""
 MIRROR_URLS=()
+SHARDS_ZIP="${OCTOP_VC_SHARDS_ZIP:-}"
 VERSION="${OCTOP_VC_VERSION:-}"
 WEB_ROOT="${OCTOP_VC_WEB_ROOT:-/opt/dw.mengxa.com}"
 DEPLOY_HOSTS=()
@@ -103,6 +116,8 @@ while (($#)); do
   case "$1" in
     --base-url)       BASE_URL="${2:-}"; shift 2 ;;
     --mirror)         MIRROR_URLS+=("${2:-}"); shift 2 ;;
+    --kind)           KIND="${2:-}"; shift 2 ;;
+    --shards-zip)     SHARDS_ZIP="${2:-}"; shift 2 ;;
     --version)        VERSION="${2:-}"; shift 2 ;;
     --target)         TARGET="${2:-}"; shift 2 ;;
     --web-root)       WEB_ROOT="${2:-}"; shift 2 ;;
@@ -193,23 +208,53 @@ fi
 
 # --- 打包 ---
 if [ "$DO_PACK" -eq 1 ]; then
-  [ -d "$RUNTIME_DIR" ] || die "staged runtime 不存在: $RUNTIME_DIR（用 --build-runtime 或在 Windows 跑 wails3 task windows:components:package）"
-  say "打包组件 (pack_video_components.py)"
-  PACK_ARGS=(--target "$TARGET" --version "$VERSION" --base-url "$BASE_URL")
-  for mirror in "${MIRROR_URLS[@]}"; do
-    PACK_ARGS+=(--base-url "$mirror")
-  done
-  PACK_ARGS+=(--out-dir "$OUT_DIR" --runtime-dir "$RUNTIME_DIR")
-  "$PY" "$REPO_ROOT/scripts/pack_video_components.py" "${PACK_ARGS[@]}" || die "打包失败"
+  if [ "$KIND" = "runtime" ]; then
+    # 运行时分片模式：从已构建的 portable zip 切出 runtime/deps/app 分片 + manifest
+    [ -n "$SHARDS_ZIP" ] || die "--kind runtime 必须给 --shards-zip（Octop-portable-*.zip 路径）"
+    [ -f "$SHARDS_ZIP" ] || die "shards zip 不存在: $SHARDS_ZIP"
+    SCRIPT="$REPO_ROOT/desktop/portable/pack_portable_shards.py"
+    [ -f "$SCRIPT" ] || die "找不到 $SCRIPT"
+    say "打包运行时分片 (pack_portable_shards.py)"
+    PACK_ARGS=(--zip "$SHARDS_ZIP" --version "$VERSION" --base-url "$BASE_URL")
+    for mirror in "${MIRROR_URLS[@]}"; do
+      PACK_ARGS+=(--base-url "$mirror")
+    done
+    PACK_ARGS+=(--out-dir "$OUT_DIR")
+    "$PY" "$SCRIPT" "${PACK_ARGS[@]}" || die "运行时分片打包失败"
+    # pack_portable_shards.py 产物在 <out-dir>/<plat>/，plat 从 zip 名推断
+    # (windows-amd64)，与 build target (win-x64) 不同 —— 从产物实际目录解析，
+    # 不要假设 $TARGET。注意 --base-url 也不要带 plat：脚本会自动追加 <plat>/。
+    local_plat="$("$PY" -c 'import sys,os; print([d for d in os.listdir(sys.argv[1]) if os.path.isdir(os.path.join(sys.argv[1],d)) and os.path.isfile(os.path.join(sys.argv[1],d,"manifest.json"))][0])' "$OUT_DIR" 2>/dev/null)"
+    [ -n "$local_plat" ] || die "无法从产物推断 platform 目录（期望 <out-dir>/<plat>/manifest.json）"
+    info "   runtime platform key = $local_plat"
+    PART_DIR="$OUT_DIR/$local_plat"
+    MANIFEST="$PART_DIR/manifest.json"
+  else
+    [ -d "$RUNTIME_DIR" ] || die "staged runtime 不存在: $RUNTIME_DIR（用 --build-runtime 或在 Windows 跑 wails3 task windows:components:package）"
+    say "打包组件 (pack_video_components.py)"
+    PACK_ARGS=(--target "$TARGET" --version "$VERSION" --base-url "$BASE_URL")
+    for mirror in "${MIRROR_URLS[@]}"; do
+      PACK_ARGS+=(--base-url "$mirror")
+    done
+    PACK_ARGS+=(--out-dir "$OUT_DIR" --runtime-dir "$RUNTIME_DIR")
+    "$PY" "$REPO_ROOT/scripts/pack_video_components.py" "${PACK_ARGS[@]}" || die "打包失败"
 
-  # 两包是硬要求：缺 browser part 说明 headless-shell 没 staged，拒绝发布不完整清单
-  if ! grep -q '"id": "browser"' "$MANIFEST" 2>/dev/null; then
-    die "产物缺少 browser part —— staged runtime 无 headless-shell（browserMode=system）。在 Windows 发布机加 --build-runtime 重新 stage 后再打包。"
+    # 两包是硬要求：缺 browser part 说明 headless-shell 没 staged，拒绝发布不完整清单
+    if ! grep -q '"id": "browser"' "$MANIFEST" 2>/dev/null; then
+      die "产物缺少 browser part —— staged runtime 无 headless-shell（browserMode=system）。在 Windows 发布机加 --build-runtime 重新 stage 后再打包。"
+    fi
+    info "两包齐全：core + browser"
   fi
-  info "两包齐全：core + browser"
 fi
 
 [ -f "$MANIFEST" ] || die "找不到 $MANIFEST（先不带 --no-pack 跑一次）"
+
+# 依 kind 决定上传的文件扩展名：运行时分片是 *.tar.gz，视频组件是 *.zip
+if [ "$KIND" = "runtime" ]; then
+  UPLOAD_GLOB='*.tar.gz'
+else
+  UPLOAD_GLOB='*.zip'
+fi
 
 # --- 本地校验：manifest 里的 sha256/size 必须与实际 zip 一致 ---
 say "本地校验 (manifest sha256 / size vs 实际文件)"
@@ -255,7 +300,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
   [ -n "$SSH_KEY" ] && SCP_OPTS+=(-i "$SSH_KEY")
   [ -n "$DEPLOY_PORT" ] && SCP_OPTS+=(-P "$DEPLOY_PORT")
 
-  mapfile -t UPLOAD_FILES < <(find "$PART_DIR" -maxdepth 1 -type f \( -name '*.zip' -o -name 'manifest.json' \) -print)
+  mapfile -t UPLOAD_FILES < <(find "$PART_DIR" -maxdepth 1 -type f \( -name "$UPLOAD_GLOB" -o -name 'manifest.json' \) -print)
   [ "${#UPLOAD_FILES[@]}" -gt 0 ] || die "没有可上传的文件"
   info "待上传($(basename "$MANIFEST") 同目录): $(for f in "${UPLOAD_FILES[@]}"; do basename "$f"; done | tr '\n' ' ')"
   info "远端目录: $REMOTE_DIR  (共 ${#DEPLOY_HOSTS[@]} 台)"
@@ -265,7 +310,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
     ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$h" "mkdir -p '$REMOTE_DIR' && chmod 755 '${WEB_ROOT%/}' '$REMOTE_DIR'" \
       || die "[$h] 远端建目录失败"
     scp "${SCP_OPTS[@]}" "${UPLOAD_FILES[@]}" "$DEPLOY_USER@$h:$REMOTE_DIR/" || die "[$h] 上传失败"
-    ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$h" "chmod 644 '$REMOTE_DIR/'manifest.json '$REMOTE_DIR/'*.zip" || die "[$h] 设权限失败"
+    ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$h" "chmod 644 '$REMOTE_DIR/'manifest.json $REMOTE_DIR/$UPLOAD_GLOB" || die "[$h] 设权限失败"
   done
   DO_VERIFY=1
 fi
@@ -286,7 +331,7 @@ if [ "$DO_VERIFY" -eq 1 ]; then
   REMOTE_DIR="${WEB_ROOT%/}/${BASE_PATH}"
   # --verify-only 单独跑时没有经过上传段，需重建待校验文件清单
   if [ -z "${UPLOAD_FILES+x}" ]; then
-    mapfile -t UPLOAD_FILES < <(find "$PART_DIR" -maxdepth 1 -type f \( -name '*.zip' -o -name 'manifest.json' \) -print)
+    mapfile -t UPLOAD_FILES < <(find "$PART_DIR" -maxdepth 1 -type f \( -name "$UPLOAD_GLOB" -o -name 'manifest.json' \) -print)
     [ "${#UPLOAD_FILES[@]}" -gt 0 ] || die "本地产物目录无可校验文件: $PART_DIR"
   fi
   say "逐台校验 sha256（每台 1 次 SSH 批量比对，避免触发 sshd 连接频率限制）"

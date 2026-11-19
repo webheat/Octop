@@ -199,12 +199,16 @@ pip_args=(pip install --python "$VENV_PY")
 if [[ "$USE_MIRROR" == 1 && -n "$PIP_INDEX_URL" ]]; then
   pip_args+=(--index-url "$PIP_INDEX_URL")
 fi
+# playwright / tencentcloud-sdk-python 自运行时瘦身后不再是核心依赖，需要时
+# 通过 extra 显式带上：--browser 时带 browser，always 带 tencentcloud（云工作台）。
+EXTRAS="tencentcloud"
+if [[ "$WANT_BROWSER" == 1 ]]; then EXTRAS="browser,tencentcloud"; fi
 WHEEL="$(resolve_wheel)"
 if [[ -n "$WHEEL" ]]; then
   log "使用本地构建产物：$WHEEL"
-  pip_args+=("$WHEEL")
+  pip_args+=("${WHEEL}[${EXTRAS}]")
 else
-  SPEC="$PACKAGE${APP_VERSION:+==$APP_VERSION}"
+  SPEC="$PACKAGE[${EXTRAS}]${APP_VERSION:+==$APP_VERSION}"
   log "从 PyPI 下载：$SPEC"
   pip_args+=("$SPEC")
 fi

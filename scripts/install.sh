@@ -563,15 +563,18 @@ fi
 _ensure_old_glibc_build_toolchain
 
 # ── Step 3: install Octop ───────────────────────────────────────────────────────
-# The playwright Python package is a core dependency. Chromium is downloaded only with --extras browser.
+# playwright / tencentcloud-sdk-python are extras (not core deps) since the
+# runtime slimming; both stay in the default set so a server install keeps the
+# browser tooling and the cloud workbench. Chromium itself is downloaded only
+# with --extras browser.
 _merge_install_extras() {
-    local result="browser"
+    local result="browser,tencentcloud"
     if [ -n "$EXTRAS" ]; then
         local IFS=','
         local part
         for part in $EXTRAS; do
             case "$part" in
-                ""|browser|channels-feishu) continue ;;
+                ""|browser|tencentcloud|channels-feishu) continue ;;
                 *) result="${result},${part}" ;;
             esac
         done

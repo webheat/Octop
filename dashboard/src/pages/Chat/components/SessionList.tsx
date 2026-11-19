@@ -58,6 +58,7 @@ import ChatNavScopeTabs, {
   ChatNavScopeEmpty,
 } from "./ChatNavScopeTabs";
 import { useChatNavDrawers } from "./ChatNavDrawers";
+import { useIsDesktopShell } from "../../../hooks/useIsDesktopShell";
 import ExpertSortMenu from "./ExpertSortMenu";
 import AgentUnreadBadge from "./AgentUnreadBadge";
 import ExpertNameLabel from "./ExpertNameLabel";
@@ -635,21 +636,28 @@ export default function SessionList({
   const { pinnedIds, isPinned, togglePin } = usePinnedExperts();
   const { mode: sortMode, setMode: setSortMode } = useExpertSort();
   const navCreate = useChatNavDrawers();
+  /**
+   * The desktop shell is a single-assistant chat surface: no experts / teams /
+   * cloud grouping, no create entries. The scope tabs are a console concept,
+   * so they are hidden *and* stop filtering — with one group there is nothing
+   * to filter by, and a stale `cloud` / `teams` value would empty the list.
+   */
+  const desktopShell = useIsDesktopShell();
 
   const hiddenAgents = useMemo(
     () =>
       sortExpertsByPin(pickHidden(agents), pinnedIds, sortMode).filter(
-        (agent) => matchesChatNavScope(agent, navScope),
+        (agent) => desktopShell || matchesChatNavScope(agent, navScope),
       ),
-    [agents, pickHidden, pinnedIds, navScope, sortMode],
+    [agents, desktopShell, pickHidden, pinnedIds, navScope, sortMode],
   );
 
   const sortedAgents = useMemo(() => {
     const visible = filterVisible(agents);
-    return sortExpertsByPin(visible, pinnedIds, sortMode).filter((agent) =>
-      matchesChatNavScope(agent, navScope),
+    return sortExpertsByPin(visible, pinnedIds, sortMode).filter(
+      (agent) => desktopShell || matchesChatNavScope(agent, navScope),
     );
-  }, [agents, filterVisible, pinnedIds, navScope, sortMode]);
+  }, [agents, desktopShell, filterVisible, pinnedIds, navScope, sortMode]);
 
   const expandedAgentId = useMemo(() => {
     const activeInScope = sortedAgents.some(
@@ -880,14 +888,18 @@ export default function SessionList({
         </div>
       ) : null}
 
-      <div className={styles.sessionScopeRow}>
-        <ChatNavScopeTabs value={navScope} onChange={setNavScope} />
-      </div>
+      {desktopShell ? null : (
+        <div className={styles.sessionScopeRow}>
+          <ChatNavScopeTabs value={navScope} onChange={setNavScope} />
+        </div>
+      )}
       <div className={styles.sessionCreateRow}>
-        <ChatNavCreateButton
-          scope={navScope}
-          onCreate={() => navCreate.open(navScope)}
-        />
+        {desktopShell ? null : (
+          <ChatNavCreateButton
+            scope={navScope}
+            onCreate={() => navCreate.open(navScope)}
+          />
+        )}
         <ExpertSortMenu mode={sortMode} onChange={setSortMode} />
       </div>
       {navCreate.drawers}
@@ -900,6 +912,19 @@ export default function SessionList({
               {catalog.loading
                 ? t("common.loading")
                 : t("chat.noSearchResults", "没有匹配的会话")}
+            </div>
+          ) : desktopShell ? (
+            // No create entries here; the desktop keeps the rail quiet and
+            // leaves the recovery choice to the chat surface itself.
+            <div className={styles.sessionEmptyAgents}>
+              <p className={styles.sessionEmptyAgentsTitle}>
+                {t("chat.noAgentsTitle")}
+              </p>
+              <p className={styles.sessionEmptyAgentsText}>
+                {unreadyExperts > 0
+                  ? t("chat.noChattableAgentsHint")
+                  : t("chat.desktopNoAgentsHint")}
+              </p>
             </div>
           ) : navScope === "experts" && unreadyExperts > 0 ? (
             <div className={styles.sessionEmptyAgents}>
