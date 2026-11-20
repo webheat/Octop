@@ -186,9 +186,44 @@ wails3 task package ARCH=amd64 VERSION=1.4.0 \
 > 连接轮询分配到不同的可达 IP，**各个分片轮流使用 part 的不同镜像**（两个镜像往往是两台不同的机器，
 > 一台机器会把单连接限速在几百 KB/s）。实测总带宽从单连接的 ≈620 KB/s 提升到 ≈1.35 MB/s（**2.2 倍**）。
 > manifest 里的 `connections` 字段可覆盖默认连接数（由 `pack_video_components.py --connections` 写入）。
+>
+> **两个容易踩的分配问题**（已修，勿回退）：
+> - 节点轮询的计数器**必须按 host+port 隔离**。HTTPS 与 plain-HTTP 是两个连接池，
+>   共用一个计数器会让两池互相抢槽位，最快的节点可能一次都没被选中。
+> - **每个分片都要能回退到其它镜像**。镜像容灾不能只在单连接路径上生效 ——
+>   一个节点挂掉不该拖垮整个 part。
+>
+> 实测（4 路并发拉 16MB）：全 HTTPS（2 台机器）≈1.10 MB/s；
+> 2 路 HTTPS + 2 路 HTTP（3 台机器）≈1.66~1.96 MB/s；6 路反而更慢。
+> **4 路是当前链路的上限**，且链路带宽本身在 0.5~2 MB/s 间波动。
+
+### 3.5.1 已发布状态（2026-11-20 18:00）
+
+| 项 | 值 |
+|---|---|
+| 组件目录 | `/opt/dw.mengxa.com/video-components/1.4.0/win-x64`（三台各自独立磁盘） |
+| 节点 | `175.178.192.87` / `1.14.182.208` / `175.178.33.107` |
+| core.zip | 104.7 MB，`sha256=0648c57866d4…`，`connections: 4` |
+| browser.zip | 120.1 MB，`sha256=b75cdbf6ede0…`，`connections: 4` |
+| manifest 镜像 | `https://dw.mengxa.com/…` + `http://dw.mengxa.com/…`（同域名双 scheme） |
+
+发布命令（会逐台上传 + SSH 比对 sha256）：
+
+```bash
+bash scripts/release-video-components.sh \
+  --base-url https://dw.mengxa.com/video-components/1.4.0/win-x64 \
+  --mirror http://dw.mengxa.com/video-components/1.4.0/win-x64 \
+  --connections 4 \
+  --host 175.178.192.87 --host 1.14.182.208 --host 175.178.33.107 \
+  --key "D:/.ssh/id_ed25519" --upload
+```
+
+> ⚠️ **重新发布前先确认 staged runtime 未变**。`desktop/src/video-runtime/` 里的
+> `node_modules` 被 `npm ci` 重装过就会产出与线上不同的 `core.zip`，
+> 而 manifest 的 sha256 必须与实际文件一致 —— 不一致时客户端会校验失败。
+> 发布后务必核对三台 sha256 一致（脚本会自动做）。
 
 ### 3.6 打绿色版（默认交付物）
-
 thin 壳编译完后，用仓库脚本组装成**免安装绿色包**（裸 exe + README，无 NSIS）：
 
 ```bash

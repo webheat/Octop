@@ -101,7 +101,13 @@ func componentSamplePort(sample string) string {
 }
 
 // componentProbeURL fetches a small prefix of the manifest. Status codes at or
-// above 400 count as a dead node; redirects are followed by the HTTP client.
+// above 400 count as a dead node.
+//
+// A redirect counts as a dead node for this scheme. The redirect is followed
+// by the client, but the answer then comes from another machine — the probe
+// would credit this node with a capability it does not have. A node whose
+// plain-HTTP port only redirects to HTTPS is exactly that case: it looks
+// healthy on :80 and then serves a redirect instead of the archive.
 func componentProbeURL(ctx context.Context, client *http.Client, rawURL string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -112,6 +118,9 @@ func componentProbeURL(ctx context.Context, client *http.Client, rawURL string) 
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		return fmt.Errorf("HTTP %d (redirect)", resp.StatusCode)
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
@@ -147,7 +156,13 @@ func probeComponentIPs(ctx context.Context, base *http.Transport, hostname strin
 				}
 				return dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
 			}
-			client := &http.Client{Transport: tr}
+			// The probe must not follow redirects: the answer after a
+			// redirect comes from another machine, and crediting this node
+			// with it would send the download to a node that only
+			// redirects.
+			client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			}}
 			start := time.Now()
 			err := componentProbeURL(probeCtx, client, sample)
 			mu.Lock()
