@@ -424,11 +424,15 @@ async def analyse_import(
         server.services.config.max_upload_bytes or upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
     )
     payload: list[tuple[str, str, bytes]] = []
+    # ``paths`` arrives as a plain list through HTTP, but a direct call (tests,
+    # in-process callers) can hand us the untouched ``Form`` marker, so guard
+    # the shape instead of trusting the annotation.
+    raw_paths = paths if isinstance(paths, list) else []
     for index, file in enumerate(files):
         filename = Path(file.filename or "upload.bin").name
         # Parallel field, not the multipart filename: parsers basename the
         # Content-Disposition name, which would silently drop the structure.
-        raw_path = paths[index].strip() if index < len(paths) else ""
+        raw_path = raw_paths[index].strip() if index < len(raw_paths) else ""
         data = await read_upload_capped(file, max_bytes=max_bytes)
         payload.append((raw_path or filename, file.content_type or "", data))
     return await analyse_upload(
