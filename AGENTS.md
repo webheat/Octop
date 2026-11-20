@@ -33,6 +33,24 @@ Navigation guide for AI coding agents working in this repository.
 - For multi-step work, sketch a short plan: `step → verify: …`
 - Before saying "done", provide verification evidence; the default ship bar is **`make all` green** (see [§6 Run commands](#6-run-commands), [§10 Change workflow](#10-change-workflow)).
 
+### Local verification is a smoke test, not the full suite
+
+> **Do not run the full test suite locally.** The full suite (backend `uv run pytest`, frontend
+> `npm test`, desktop `go test ./...`) is the **CI gate's** job — it runs on the remote
+> pipeline and covers the platforms this machine does not.
+
+| Change | Local verification (allowed) | Not allowed locally |
+|---|---|---|
+| Backend (`src/octop/**`) | Import the module, boot the service, call the 1–2 endpoints the change touches, run the **single** test file that covers it | `uv run pytest` (whole suite) |
+| Frontend (`dashboard/**`) | `npx tsc -b`, build the touched page, run the **one** test file | `npm test` (whole suite) |
+| Desktop (`desktop/**`) | `go build ./...`, `go vet ./...`, run the **changed** package's tests | `go test ./...` (all packages) |
+| Migrations | Apply against a scratch DB, check the version watermark | Migrating a shared database |
+
+- If a change spans several areas, run **one focused command per area** — never the union.
+- Say plainly in the summary which commands you ran and what they proved.
+- If a change is broad enough that a smoke test cannot prove it, **say so** and let CI decide —
+  do not quietly expand into a full local run.
+
 ## 2. What this is
 
 **Octop** — self-hosted AI assistant platform (multi-user, multi-agent).
@@ -216,6 +234,13 @@ uv run pytest tests/integration -x -q # integration tests only
 cd dashboard && npx tsc -b             # frontend typecheck (after UI changes)
 make build-frontend                     # dashboard/ → src/octop/dashboard/
 ```
+
+> ⚠️ **The commands above are the CI gate's repertoire, not the local routine.**
+> Locally run **only the focused commands for the code you touched** — a single test file,
+> a single package, a typecheck, a build. See
+> [Local verification is a smoke test, not the full suite](#local-verification-is-a-smoke-test-not-the-full-suite).
+> `make all` and the whole-suite pytest are **not** local steps; pre-commit still runs them
+> on commit, so a red suite blocks the commit anyway.
 
 **Git hooks (required for local commits):** after cloning, run **`make install-hooks`** once. That sets `core.hooksPath=.githooks` so every `git commit` runs **`make all`** (which first runs **`format-all`**: backend Ruff + dashboard Prettier write, then lint / typecheck / test) and dashboard **`npm run build`**. Formatted files that were already staged are re-added so the commit includes the formatted content. Bypass only in emergencies: `SKIP_PRECOMMIT=1 git commit …` or `git commit --no-verify`. Do **not** skip hooks to land red tests — fix the suite first (CI runs on Linux **and** Windows).
 

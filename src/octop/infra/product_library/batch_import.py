@@ -29,6 +29,7 @@ from octop.infra.product_library.service import (
 )
 from octop.infra.product_library.vision import (
     MAX_ERROR_CHARS,
+    MAX_GROUP_CHARS,
     MAX_IMAGE_BYTES,
     categorise_image,
     resolve_vision_model,
@@ -39,6 +40,13 @@ from octop.infra.utils.ulid import new_ulid
 # Only raster images can be categorised; other files are reported as skipped.
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"})
 _DEFAULT_CONCURRENCY = 3
+# Relative-path metadata is display/grouping only: bound it so a hostile or
+# merely absurd client path cannot bloat the manifest.
+MAX_PATH_PARTS = 8
+MAX_PATH_CHARS = 400
+# A folder name is a weak prior: only used when vision is unsure of itself.
+FOLDER_PRIOR_MIN_CONFIDENCE = 0.5
+FOLDER_PRIOR_CONFIDENCE = 0.6
 
 
 def _norm(text: str) -> str:
@@ -54,6 +62,52 @@ def _norm(text: str) -> str:
 def group_key(group: str, category: str) -> str:
     """Stable key for images the model says belong to the same product."""
     return f"{_norm(category)}::{_norm(group)}"
+
+
+def sanitize_relative_path(raw: str, fallback: str = "upload.bin") -> str:
+    """Turn a client-supplied path into a safe, display-only relative path.
+
+    Never used to build a filesystem path: callers keep using the
+    index-prefixed flat storage name. This value is metadata for grouping, so
+    traversal components are dropped rather than rejected.
+    """
+    text = (raw or "").replace("\\", "/").strip()
+    # Drop Windows drive letters and any leading slashes.
+    text = re.sub(r"^[A-Za-z]:", "", text).lstrip("/")
+    parts = [part.strip() for part in text.split("/") if part not in ("", ".", "..")]
+    parts = [part for part in parts if part]
+    if not parts:
+        return fallback
+    rel = "/".join(parts[-MAX_PATH_PARTS:])  # keep the most specific tail
+    return rel[:MAX_PATH_CHARS] or fallback
+
+
+def folder_of(rel_path: str) -> str:
+    """Top-level directory name of a relative path; "" for a bare filename."""
+    parts = [part for part in (rel_path or "").split("/") if part]
+    return parts[0] if len(parts) > 1 else ""
+
+
+def _apply_folder_prior(result: dict[str, Any], folder: str) -> dict[str, Any]:
+    """Fall back to the source folder name when vision is not confident.
+
+    A folder name is cheap but noisy (``新建文件夹``, ``IMG_0002``), so it only
+    wins when the model returned no group or scored below the threshold. A
+    confident model answer is never overridden.
+    """
+    hint = (folder or "").strip()
+    if not hint:
+        result["group_source"] = "vision"
+        return result
+    current = str(result.get("group") or "").strip()
+    confidence = float(result.get("confidence") or 0.0)
+    if not current or confidence < FOLDER_PRIOR_MIN_CONFIDENCE:
+        result["group"] = hint[:MAX_GROUP_CHARS]
+        result["confidence"] = max(confidence, FOLDER_PRIOR_CONFIDENCE)
+        result["group_source"] = "folder"
+    else:
+        result["group_source"] = "vision"
+    return result
 
 
 def _job_dir(paths: PathLayout, owner_id: int, job_id: str) -> Path:
@@ -91,10 +145,13 @@ async def analyse_upload(
 ) -> dict[str, Any]:
     """Categorise an uploaded batch and return a dry-run grouping plan.
 
-    ``files`` is a list of ``(filename, media_type, data)`` tuples. Images over
-    the vision size limit or with unsupported bytes are reported in ``failed``
-    / ``skipped`` rather than aborting the batch. No product or asset rows are
-    written; the raw bytes and their metadata are kept in a temporary job dir.
+    ``files`` is a list of ``(relative_path, media_type, data)`` tuples. The
+    first element is the client-supplied relative path (e.g.
+    ``hiking-bag/front/01.jpg``); its basename names the stored blob and its
+    top-level folder is kept as a grouping prior. Images over the vision size
+    limit or with unsupported bytes are reported in ``failed`` / ``skipped``
+    rather than aborting the batch. No product or asset rows are written; the
+    raw bytes and their metadata are kept in a temporary job dir.
     """
     job_id = new_ulid()
     job_dir = _job_dir(service.paths, owner_id, job_id)
@@ -105,17 +162,24 @@ async def analyse_upload(
     pending: list[dict[str, Any]] = []  # manifest rows that need a vision call
 
     for filename, media_type, data in files:
-        safe_name = Path(filename.replace("\\", "/")).name or "upload.bin"
+        rel_path = sanitize_relative_path(filename)
+        safe_name = Path(rel_path).name or "upload.bin"
         extension = Path(safe_name).suffix.lower()
         if extension not in _IMAGE_EXTENSIONS:
-            skipped.append({"filename": safe_name, "reason": "unsupported type"})
+            skipped.append(
+                {"filename": safe_name, "relative_path": rel_path, "reason": "unsupported type"}
+            )
             continue
         content_hash = hashlib.sha256(data).hexdigest()
+        # Disk layout stays flat: the index prefix already prevents collisions,
+        # and relative_path is metadata only.
         storage_name = f"{len(items)}-{safe_name}"
         (job_dir / storage_name).write_bytes(data)
         row: dict[str, Any] = {
             "index": len(items),
             "filename": safe_name,
+            "relative_path": rel_path,
+            "folder": folder_of(rel_path),
             "media_type": media_type or "image/jpeg",
             "content_hash": content_hash,
             "storage_name": storage_name,
@@ -161,14 +225,17 @@ async def analyse_upload(
             # A ready description proves the bytes were described before, but it
             # has no grouping hint. Reuse description/tags; group stays empty so
             # the user files it manually. Cheaper than another vision call.
-            row["result"] = {
-                "group": "",
-                "category": "",
-                "description": cached.get("description", ""),
-                "tags": json.loads(cached.get("tags") or "[]"),
-                "confidence": 0.0,
-                "reused": True,
-            }
+            row["result"] = _apply_folder_prior(
+                {
+                    "group": "",
+                    "category": "",
+                    "description": cached.get("description", ""),
+                    "tags": json.loads(cached.get("tags") or "[]"),
+                    "confidence": 0.0,
+                    "reused": True,
+                },
+                row.get("folder", ""),
+            )
             return
         if setup_error or model_pair is None:
             row["setup_error"] = setup_error or "no vision model configured"
@@ -181,12 +248,13 @@ async def analyse_upload(
                     data,
                     row["media_type"],
                     model_pair[0],
+                    row.get("folder", ""),
                 )
             except Exception as exc:  # noqa: BLE001 - one bad image must not fail the batch
                 row["setup_error"] = str(exc)[:MAX_ERROR_CHARS]
                 return
             result["reused"] = False
-            row["result"] = result
+            row["result"] = _apply_folder_prior(result, row.get("folder", ""))
 
     await asyncio.gather(*(categorise(row) for row in representatives.values()))
 
@@ -209,7 +277,11 @@ async def analyse_upload(
     _write_manifest(job_dir, manifest)
 
     failed = [
-        {"filename": row["filename"], "reason": row["setup_error"]}
+        {
+            "filename": row["filename"],
+            "relative_path": row["relative_path"],
+            "reason": row["setup_error"],
+        }
         for row in items
         if row.get("setup_error")
     ]
@@ -234,9 +306,12 @@ async def analyse_upload(
             {
                 "index": row["index"],
                 "filename": row["filename"],
+                "relative_path": row["relative_path"],
+                "folder": row["folder"],
                 "confidence": result["confidence"],
                 "description": result["description"],
                 "tags": result["tags"],
+                "group_source": result.get("group_source", "vision"),
                 "duplicate": bool(result.get("reused")),
             }
         )

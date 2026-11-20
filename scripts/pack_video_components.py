@@ -9,15 +9,22 @@ consume part-by-part with resume + SHA-256 verification.
     # after `wails3 task windows:components:package` has staged video-runtime/
     python scripts/pack_video_components.py \
         --target win-x64 --version 1.4.0 \
-        --base-url https://dl1.example.com/video-components/1.4.0/win-x64 \
-        --base-url https://dl2.example.com/video-components/1.4.0/win-x64 \
-        --base-url https://dl3.example.com/video-components/1.4.0/win-x64 \
-        --base-url https://dl4.example.com/video-components/1.4.0/win-x64 \
+        --base-url https://dw.mengxa.com/video-components/1.4.0/win-x64 \
+        --base-url http://dw.mengxa.com/video-components/1.4.0/win-x64 \
+        --connections 4 \
         --out-dir dist/video-components
 
 Repeat --base-url once per independent node. The first becomes primary and all
 are written into every part's urls[] in order, so the client's bootstrap fetcher
 can skip a dead node (DNS round-robin alone cannot detect or route around one).
+The same host may be listed twice under different schemes: the client probes
+every (host, scheme) pair separately and keeps the nodes that answered, so an
+HTTP-only node is not written off when its TLS setup is broken.
+
+--connections sets how many parallel range requests the client uses per part
+(written into every part). The origin throttles a single connection to a few
+hundred KB/s while its nodes are independent machines, so several ranges over
+several mirrors are what make a 110 MB part finish in minutes.
 
 Outputs (under <out-dir>/<target>/):
     core.zip        node.exe + locked Remotion deps + worker/project + src
@@ -115,12 +122,25 @@ def write_zip(target: Path, files: list[Path], root: Path, arc_prefix: Path | No
             zf.writestr(info, path.read_bytes())
 
 
-def build(target: str, version: str, base_urls: list[str], out_dir: Path, runtime: Path) -> Path:
+def build(
+    target: str,
+    version: str,
+    base_urls: list[str],
+    out_dir: Path,
+    runtime: Path,
+    connections: int = 1,
+) -> Path:
     """Build CDN parts. Each part lists every mirror URL for client-side failover.
 
     The first base URL is the primary; remaining ones are mirrors. bootstrap's
     fetcher tries them in order with retries and checksum verification, so a
     dead node is skipped without relying on DNS (which cannot detect failures).
+
+    `connections` is written into every part as the number of parallel range
+    requests the client should use. The origin throttles a single connection
+    to a few hundred KB/s while its nodes are independent machines, so several
+    ranges over several nodes are what make a 110 MB part finish in minutes
+    instead of a quarter of an hour.
     """
     if not runtime.is_dir():
         raise SystemExit(
@@ -152,6 +172,7 @@ def build(target: str, version: str, base_urls: list[str], out_dir: Path, runtim
             "target": "",
             "stripRoot": False,
             "required": True,
+            "connections": connections,
         }
     ]
 
@@ -170,6 +191,7 @@ def build(target: str, version: str, base_urls: list[str], out_dir: Path, runtim
                 # Always installed: the headless shell is the pinned renderer.
                 # A system Chrome/Edge remains a runtime fallback in detectBrowser().
                 "required": True,
+                "connections": connections,
             }
         )
 
@@ -206,6 +228,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out-dir", default=str(DIST_DIR))
     parser.add_argument("--runtime-dir", default=str(RUNTIME_DIR))
+    parser.add_argument(
+        "--connections",
+        type=int,
+        default=1,
+        help=(
+            "Parallel range requests the client uses per part. The origin "
+            "throttles one connection to a few hundred KB/s while its nodes "
+            "are independent machines, so 4 turns a 110 MB part into a "
+            "couple of minutes. Zero means one connection."
+        ),
+    )
     args = parser.parse_args(argv)
 
     version = args.version or project_version()
@@ -216,13 +249,15 @@ def main(argv: list[str] | None = None) -> int:
         base_urls,
         Path(args.out_dir),
         Path(args.runtime_dir),
+        args.connections,
     )
     doc = json.loads(manifest.read_text(encoding="utf-8"))
     print(f"[video-components] manifest: {manifest}")
     print(f"[video-components] mirrors: {len(base_urls)} (primary: {base_urls[0]})")
+    print(f"[video-components] connections per part: {args.connections}")
     for part in doc["parts"]:
         size_mb = part["size"] / (1024 * 1024)
-        print(f"  - {part['id']:<8} {size_mb:8.1f} MB  required={part['required']}  urls={len(part['urls'])}")
+        print(f"  - {part['id']:<8} {size_mb:8.1f} MB  required={part['required']}  urls={len(part['urls'])}  connections={part.get('connections', 1)}")
     return 0
 
 

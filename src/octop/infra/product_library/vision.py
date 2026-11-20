@@ -143,18 +143,38 @@ def parse_categorisation_payload(raw: str) -> dict[str, Any]:
     }
 
 
-def categorise_image(data: bytes, media_type: str, model: Any) -> dict[str, Any]:
+def _categorise_prompt(folder_hint: str = "") -> str:
+    """Base categorisation prompt, optionally seeded with a folder-name prior.
+
+    Kept byte-identical to ``CATEGORISE_PROMPT`` when no hint is given so
+    existing imports see no prompt change.
+    """
+    hint = (folder_hint or "").strip()
+    if not hint:
+        return CATEGORISE_PROMPT
+    return (
+        CATEGORISE_PROMPT + f'\nThe image comes from a folder named "{hint[:MAX_GROUP_CHARS]}". '
+        'If that name plausibly matches the visible subject, use it as "group"; '
+        "ignore it when it contradicts what you actually see."
+    )
+
+
+def categorise_image(
+    data: bytes, media_type: str, model: Any, folder_hint: str = ""
+) -> dict[str, Any]:
     """One bounded vision call returning a validated categorisation payload.
 
     Uses the same base64 image channel as ``describe_image`` but a dedicated
     structured prompt. The caller owns provider resolution and concurrency.
+    ``folder_hint`` is the source folder name, passed as a weak grouping prior;
+    an empty hint leaves the prompt untouched.
     """
     if model is None:
         raise ValueError("categorise_image requires a model")
     encoded = base64.b64encode(data).decode("ascii")
     message = HumanMessage(
         content=[
-            {"type": "text", "text": CATEGORISE_PROMPT},
+            {"type": "text", "text": _categorise_prompt(folder_hint)},
             {
                 "type": "image_url",
                 "image_url": {"url": f"data:{media_type};base64,{encoded}"},

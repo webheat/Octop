@@ -59,6 +59,13 @@ func componentsManifestPlatform() string {
 	return "win-x64"
 }
 
+// videoComponentConnections is how many range requests a component part is
+// fetched with. The component host limits a single connection to roughly
+// 600 KB/s, while its nodes are independent machines whose bandwidth adds
+// up — so several connections over several nodes are what make the install
+// finish in minutes instead of a quarter of an hour.
+const videoComponentConnections = 4
+
 func environmentProgress(value float64) *float64 { return &value }
 
 // manifestURLs splits a comma-separated URL list and sanitizes each entry.
@@ -69,7 +76,7 @@ func manifestURLs(raw string) []string {
 	var result []string
 	seen := make(map[string]bool)
 	for _, part := range strings.Split(raw, ",") {
-		clean := sanitizeEnvironmentInstallerURL(part)
+		clean := sanitizeInstallerURL(part)
 		if clean == "" || seen[clean] {
 			continue
 		}
@@ -136,9 +143,9 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 	// Probe the DNS records behind the component host once. Every connection
 	// made by this client (manifest and parts alike) then prefers a reachable
 	// node, so a dead server in a round-robin DNS set cannot stall the install.
-	installClient := componentsDownloadClient(manifestURLs, navLogf)
+	manifestClient := componentsDownloadClient(manifestURLs, navLogf)
 	manifest, err := bootstrap.LoadManifest(
-		manifestURLs, installClient, "",
+		manifestURLs, manifestClient, "",
 		func(format string, args ...any) { navLogf("video install: "+format, args...) },
 	)
 	if err != nil {
@@ -147,6 +154,16 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		return
 	}
 	navLogf("video install: manifest loaded version=%s platform=%s parts=%d", manifest.Version, manifest.Platform, len(manifest.Parts))
+
+	// The archives may live on another host than the manifest, so the
+	// download client is built again — this time with the part locations
+	// included. Their nodes get probed and pinned as well.
+	var partURLs []string
+	for _, part := range manifest.Parts {
+		partURLs = append(partURLs, part.URLs...)
+	}
+	installClient := componentsDownloadClient(manifestURLs, navLogf, partURLs...)
+
 	platform := componentsManifestPlatform()
 	if platform == "" || (manifest.Platform != "" && manifest.Platform != platform) {
 		navLogf("video install: platform mismatch, this host needs %q but the manifest serves %q", platform, manifest.Platform)
@@ -200,7 +217,12 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		Manifest: manifest,
 		Client:   installClient,
 		Merge:    true,
-		Progress: report,
+		// The component host throttles per connection, so a single stream
+		// only reaches a fraction of the available bandwidth. Several
+		// parallel range requests — spread over the independent nodes by the
+		// client above — turn a ~600 KB/s crawl into a multi-megabyte one.
+		Connections: videoComponentConnections,
+		Progress:    report,
 		Log: func(format string, args ...any) {
 			navLogf("video install: "+format, args...)
 		},

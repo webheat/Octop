@@ -18,6 +18,7 @@ from octop.api.deps import current_user, get_server
 from octop.config import DEFAULT_MAX_UPLOAD_MB, upload_mb_to_bytes
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.product_library.audio import load_catalog, pick_track, track_path
+from octop.infra.product_library.base_library import BaseLibraryService, export_base_manifest
 from octop.infra.product_library.batch_import import analyse_upload, commit_import
 from octop.infra.product_library.llm_video_planner import generate_model_plan
 from octop.infra.product_library.narration import (
@@ -40,6 +41,8 @@ from octop.infra.product_library.vision import (
     describe_missing_assets,
 )
 from octop.infra.voice.manager import VoiceManager
+
+_BASE_STATUS = Literal["ready", "quarantined"]
 
 router = APIRouter()
 
@@ -138,6 +141,48 @@ class ProjectItemsResponse(BaseModel):
     items: list[ProjectResponse]
 
 
+class BaseImageResponse(BaseModel):
+    image_id: str
+    filename: str
+    media_type: str
+    byte_size: int
+    content_hash: str
+    phash: str = ""
+    dhash: str = ""
+    width: int = 0
+    height: int = 0
+    blur_score: float = 0.0
+    brightness: float = 0.0
+    flatness: float = 0.0
+    quality_score: float = 0.0
+    dominant_colors: list[str] = []
+    storage_path: str
+    status: str = "ready"
+    reason: str = ""
+    created_at: int = 0
+
+
+class BaseIngestResponse(BaseModel):
+    total: int
+    ready_count: int
+    isolated_count: int
+    ready: list[BaseImageResponse]
+    isolated: list[BaseImageResponse]
+
+
+class BaseImageItemsResponse(BaseModel):
+    items: list[BaseImageResponse]
+
+
+class BasePurgeResponse(BaseModel):
+    removed: int
+
+
+class BasePreviewBody(BaseModel):
+    image_ids: list[str] = Field(min_length=1)
+    name: str = Field(default="", max_length=200)
+
+
 class DescribeMissingResponse(BaseModel):
     total: int
     succeeded: int
@@ -148,9 +193,16 @@ class DescribeMissingResponse(BaseModel):
 class ImportItem(BaseModel):
     index: int
     filename: str
+    relative_path: str = Field(
+        default="", description="Client-supplied path, e.g. `hiking-bag/front/01.jpg`."
+    )
+    folder: str = Field(default="", description="Top-level folder used as a grouping prior.")
     confidence: float = 0.0
     description: str = ""
     tags: list[str] = []
+    group_source: Literal["vision", "folder"] = Field(
+        default="vision", description="Whether the group came from the model or the folder name."
+    )
     duplicate: bool = False
 
 
@@ -163,6 +215,7 @@ class ImportGroup(BaseModel):
 
 class ImportNotice(BaseModel):
     filename: str
+    relative_path: str = ""
     reason: str
 
 
@@ -396,14 +449,18 @@ async def upload_assets(
     response_model=ImportAnalysisResponse,
     summary="Categorise a directory of images into suggested product groups (dry run)",
     description=(
-        "Accepts the files picked by the browser's directory selector, runs one "
-        "vision call per distinct image and returns a reviewable grouping plan. "
-        "Writes no products or assets; the files are kept in a temporary job "
-        "directory until commit."
+        "Accepts the files picked by the browser's file or directory selector, "
+        "runs one vision call per distinct image and returns a reviewable "
+        "grouping plan. `paths` is an optional parallel field carrying each "
+        "file's relative path so directory structure survives the upload; when "
+        "absent or shorter than `files`, the entries fall back to the bare "
+        "filename. Writes no products or assets; the files are kept in a "
+        "temporary job directory until commit."
     ),
 )
 async def analyse_import(
     files: list[UploadFile] = File(...),
+    paths: list[str] = Form(default=[]),
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
@@ -412,16 +469,124 @@ async def analyse_import(
         server.services.config.max_upload_bytes or upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
     )
     payload: list[tuple[str, str, bytes]] = []
-    for file in files:
+    # ``paths`` arrives as a plain list through HTTP, but a direct call (tests,
+    # in-process callers) can hand us the untouched ``Form`` marker, so guard
+    # the shape instead of trusting the annotation.
+    raw_paths = paths if isinstance(paths, list) else []
+    for index, file in enumerate(files):
         filename = Path(file.filename or "upload.bin").name
+        # Parallel field, not the multipart filename: parsers basename the
+        # Content-Disposition name, which would silently drop the structure.
+        raw_path = raw_paths[index].strip() if index < len(raw_paths) else ""
         data = await read_upload_capped(file, max_bytes=max_bytes)
-        payload.append((filename, file.content_type or "", data))
+        payload.append((raw_path or filename, file.content_type or "", data))
     return await analyse_upload(
         service,
         server.services.provider_repo,
         owner_id=user.id,
         files=payload,
     )
+
+
+def _base_service(server: Any) -> BaseLibraryService:
+    return BaseLibraryService(server.services.paths, server.services.product_library_repo)
+
+
+@router.post(
+    "/product-library/base-library/ingest",
+    response_model=BaseIngestResponse,
+    summary="Screen uploaded images locally and build the curated base library",
+    description=(
+        "Uses PIL + numpy only — no vision model call. Clean images are indexed "
+        "as ready; corrupt, low-quality and near-duplicate images are isolated "
+        "under the user's quarantine directory for cleanup."
+    ),
+)
+async def ingest_base_images(
+    files: list[UploadFile] = File(...),
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    max_bytes = int(
+        server.services.config.max_upload_bytes or upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
+    )
+    payload: list[tuple[str, str, bytes]] = []
+    for file in files:
+        data = await read_upload_capped(file, max_bytes=max_bytes)
+        payload.append((Path(file.filename or "upload.bin").name, file.content_type or "", data))
+    return await asyncio.to_thread(_base_service(server).ingest, user.id, payload)
+
+
+@router.get(
+    "/product-library/base-library",
+    response_model=BaseImageItemsResponse,
+    summary="List curated base images (ready or quarantined)",
+)
+async def list_base_images(
+    status: _BASE_STATUS | None = None,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    return {"items": _base_service(server).list_images(user.id, status=status)}
+
+
+@router.get(
+    "/product-library/base-library/manifest",
+    summary="Export a portable manifest of the curated base library",
+)
+async def get_base_manifest(
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    service = _base_service(server)
+    return export_base_manifest(user.id, service.list_images(user.id, status="ready"))
+
+
+@router.post(
+    "/product-library/base-library/{image_id}/restore",
+    response_model=BaseImageResponse,
+    summary="Approve a quarantined image into the ready base library",
+)
+async def restore_base_image(
+    image_id: str,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    restored = await asyncio.to_thread(_base_service(server).restore, user.id, image_id)
+    if restored is None:
+        raise _not_found()
+    return restored
+
+
+@router.delete(
+    "/product-library/base-library/quarantine",
+    response_model=BasePurgeResponse,
+    summary="Delete isolated images after review",
+)
+async def purge_quarantine(
+    reason: Literal["corrupt", "low_quality", "duplicate"] | None = None,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    return await asyncio.to_thread(_base_service(server).purge, user.id, reason=reason)
+
+
+@router.post(
+    "/product-library/base-library/preview-video",
+    summary="Preview a video plan built directly from curated base images",
+)
+async def preview_base_video(
+    body: BasePreviewBody,
+    plan: VideoPlanRequest,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> dict[str, Any]:
+    result = _base_service(server).plan_from_base_images(
+        user.id, body.image_ids, plan, product_name=body.name
+    )
+    if result is None:
+        raise _not_found()
+    return result
 
 
 @router.post(

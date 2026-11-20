@@ -536,9 +536,8 @@
     "aiDescriptionModel": "模型",
     "aiDescriptionDone": "已识别 {{count}} 张图片",
     "aiDescriptionPartial": "{{failed}} 张图片识别失败，可单独重试",
-    "importDirectory": "目录导入",
-    "importSelectHint": "选择一个包含产品图片的文件夹（含子目录），系统会逐张识别并按产品自动分组。建议使用 Chrome / Edge 浏览器。",
-    "importSelected": "已选择 {{count}} 个文件",
+    "importDirectory": "导入素材",
+    "importSelectHint": "可选择图片、选择文件夹或直接把图片和文件夹拖进来（可混选）；系统会逐张识别并按产品自动分组。",
     "importCostHint": "识别会消耗模型额度，相同图片不会重复识别。请在确认前复核分组结果。",
     "importAnalyze": "开始识别（{{count}} 个文件）",
     "importReviewHint": "复核自动分组：可修改产品名/品类，勾选要排除的图片，或用下拉框把图片移动到其它分组。",
@@ -550,7 +549,13 @@
     "importSkipped": "已跳过 {{count}} 个非图片文件",
     "importFailedCount": "{{count}} 张图片识别失败",
     "importNoGroups": "没有识别到可归档的图片",
-    "importFailed": "导入失败，请稍后重试"
+    "importFailed": "导入失败，请稍后重试",
+    "importPickImages": "选择图片",
+    "importPickFolder": "选择文件夹",
+    "importDropHint": "把图片或文件夹拖到这里（可混选）",
+    "importQueueSummary": "已选 {{count}} 个文件",
+    "importQueuePaths": "包含目录：{{paths}}",
+    "importTruncated": "超出 {{max}} 个文件上限，已截断"
   },
   "videoWizard": {
     "title": "产品视频制作向导",

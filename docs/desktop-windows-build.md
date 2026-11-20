@@ -144,15 +144,115 @@ wails3 task windows:components:installer VERSION=1.4.0 \
 需要从零重建 runtime 时才用 `windows:components:package`（它会跑
 `remotion/build-desktop-runtime.mjs`，要联网拉 Node 与 headless shell，慢很多）。
 
-打客户端时把组件下载地址编译进去，界面才会出现「下载视频组件」按钮：
+打客户端时把组件 **manifest.json** 地址编译进去，界面才会出现「下载视频环境」按钮并执行安装：
 
 ```bash
 wails3 task package ARCH=amd64 VERSION=1.4.0 \
-  VIDEO_COMPONENTS_URL="https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-video-components-windows-x64-1.4.0.exe"
+  VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json"
 ```
 
-> 这个地址**只能是单个 URL**（不像运行时可给逗号列表），取不到时界面退化成
-> 「联系管理员获取安装包」。72 MB 压得进 Gitee 附件，所以首选 Gitee 直连。
+> ⚠️ **2026-11-20 修正（曾导致「构建进去却报 NO_INSTALLER」）**：这里必须是
+> `bootstrap.LoadManifest` 能解析的 **manifest.json URL**，不是 NSIS 安装包 `.exe` 链接。
+> 旧文档里的 `Octop-video-components-*.exe` 直链是早期单文件安装器格式，代码已改为
+> `manifest.json` + `parts[]` 分片下载（带断点续传与 SHA256），填 `.exe` 会解析失败。
+> manifest URL **支持逗号分隔多节点**（主 + 镜像容灾），取不到时 `environment_install`
+> 返回 `NO_INSTALLER`。线上可用地址见 `scripts/release-video-components.sh` 输出。
+
+> ★ **2026-11-20 实测：manifest URL 必须烘焙多节点**。`dw.mengxa.com` 的 DNS 轮询到
+> 四个 IP，各节点的 TLS/站点配置**并不一致**（实测复核结论）：
+>
+> | IP | HTTPS | HTTP | 说明 |
+> |---|---|---|---|
+> | `1.14.182.208` | ✅ 200（`CN=dw.mengxa.com`，Let's Encrypt YE1） | ✅ 206 | 正常节点，≈649 KB/s |
+> | `175.178.33.107` | ✅ 200（同上，证书一致） | **301 → HTTPS** | HTTPS ≈287 KB/s；**HTTP 端口只做跳转，不直接供文件** |
+> | `175.178.192.87` | ❌ SNI 不匹配（`tlsv1 unrecognized name`） | ✅ 206 | **只服务 HTTP**，nginx 没有 `dw.mengxa.com` 的 server 块，≈696 KB/s |
+> | `8.134.147.195` | ❌ 证书为 `CN=ymxt.top` 且 2026-07-29 已过期 | 403 | **阿里云 ICP 拦截机**，根本不是本站点 |
+>
+> ⚠️ **`175.178.33.107` 的 HTTP 端口只返回 301 跳转到 HTTPS**，不直接提供文件。
+> 探测若跟随重定向就会把它误判为「HTTP 健康节点」—— 所以**探测不跟随重定向**，
+> 3xx 直接算该节点在此 scheme 下不可用。
+>
+> ⚠️ **`8.134.147.195` 是 DNS 层面的根因**：`http://dw.mengxa.com` 走默认 DNS 轮询会命中它，
+> 于是拿到 403 拦截页而不是文件。把它从 `dw.mengxa.com` 的 DNS 记录里摘掉，
+> `http://dw.mengxa.com` 才能像 `https://` 一样直接可用。
+>
+> 客户端的 `componentsDownloadClient` 会逐 IP 探测并自动避开坏节点，所以只要 URL 列表里
+> 含有可达节点即可。**推荐烘焙双 scheme（同域名）**：
+> ```bash
+> VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json"
+> ```
+>
+> **探测按 (host, scheme) 分别进行**：只探 HTTPS 会把「只服务 HTTP」的好节点误判为死节点，
+> 白丢一半带宽；客户端因此按 `host|scheme` 分组探测，并**按端口维护可用节点列表** ——
+> HTTP-only 的节点不会被派给 :443 连接（它的 TLS 从未验证过）。
+>
+> **part 下载会并行开多个 Range 连接**（默认 4 路，见 `videoComponentConnections`），
+> 连接轮询分配到不同的可达 IP，**各个分片轮流使用 part 的不同镜像**（两个镜像往往是两台不同的机器，
+> 一台机器会把单连接限速在几百 KB/s）。实测总带宽从单连接的 ≈620 KB/s 提升到 ≈1.35 MB/s（**2.2 倍**）。
+> manifest 里的 `connections` 字段可覆盖默认连接数（由 `pack_video_components.py --connections` 写入）。
+>
+> **两个容易踩的分配问题**（已修，勿回退）：
+> - 节点轮询的计数器**必须按 host+port 隔离**。HTTPS 与 plain-HTTP 是两个连接池，
+>   共用一个计数器会让两池互相抢槽位，最快的节点可能一次都没被选中。
+> - **每个分片都要能回退到其它镜像**。镜像容灾不能只在单连接路径上生效 ——
+>   一个节点挂掉不该拖垮整个 part。
+>
+> 实测（4 路并发拉 16MB）：全 HTTPS（2 台机器）≈1.10 MB/s；
+> 2 路 HTTPS + 2 路 HTTP（3 台机器）≈1.66~1.96 MB/s；6 路反而更慢。
+> **4 路是当前链路的上限**，且链路带宽本身在 0.5~2 MB/s 间波动。
+
+### 3.5.1 已发布状态（2026-11-20 18:00）
+
+| 项 | 值 |
+|---|---|
+| 组件目录 | `/opt/dw.mengxa.com/video-components/1.4.0/win-x64`（三台各自独立磁盘） |
+| 节点 | `175.178.192.87` / `1.14.182.208` / `175.178.33.107` |
+| core.zip | 104.7 MB，`sha256=0648c57866d4…`，`connections: 4` |
+| browser.zip | 120.1 MB，`sha256=b75cdbf6ede0…`，`connections: 4` |
+| manifest 镜像 | `https://dw.mengxa.com/…` + `http://dw.mengxa.com/…`（同域名双 scheme） |
+
+发布命令（会逐台上传 + SSH 比对 sha256）：
+
+```bash
+bash scripts/release-video-components.sh \
+  --base-url https://dw.mengxa.com/video-components/1.4.0/win-x64 \
+  --mirror http://dw.mengxa.com/video-components/1.4.0/win-x64 \
+  --connections 4 \
+  --host 175.178.192.87 --host 1.14.182.208 --host 175.178.33.107 \
+  --key "D:/.ssh/id_ed25519" --upload
+```
+
+> ⚠️ **重新发布前先确认 staged runtime 未变**。`desktop/src/video-runtime/` 里的
+> `node_modules` 被 `npm ci` 重装过就会产出与线上不同的 `core.zip`，
+> 而 manifest 的 sha256 必须与实际文件一致 —— 不一致时客户端会校验失败。
+> 发布后务必核对三台 sha256 一致（脚本会自动做）。
+
+### 3.6 打绿色版（默认交付物）
+thin 壳编译完后，用仓库脚本组装成**免安装绿色包**（裸 exe + README，无 NSIS）：
+
+```bash
+# 1) 先编译 thin 壳，烘焙后端地址与多节点 manifest URL
+cd desktop/src
+wails3 task windows:generate:syso ARCH=amd64 VERSION=1.4.1
+GOOS=windows CGO_ENABLED=0 GOARCH=amd64 go build -tags production,thin -trimpath -buildvcs=false \
+  -ldflags="-w -s -H windowsgui \
+    -X main.defaultServerURL=https://ocbot.aixifs.com/videogen \
+    -X main.defaultVideoComponentsURL=https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json" \
+  -o bin/Octop.exe .
+
+# 2) 组装绿色包
+cd ../..
+python scripts/pack_green_client.py \
+  --exe desktop/src/bin/Octop.exe --out-dir desktop/src/bin --version 1.4.1
+# 产物：Octop-green-windows-amd64-1.4.1.zip (5.3 MB) 与 .7z (4.1 MB)
+```
+
+> **绿色包里没有 `video-runtime/` 骨架，这是有意的**：已发布的 `core.zip` 本身就带
+> node.exe、worker 脚本与 Remotion 依赖树，`bootstrap.Run` 会把它解到 exe 同级的
+> `video-runtime/`（目录不存在会自动创建）。再塞一份骨架等于让用户白下载一遍。
+>
+> 打包时注意 **7-Zip 不能把归档写进正在被归档的目录**（会把自己越写越大，实测膨胀到
+> 968 MB）；仓库脚本用临时目录做暂存区绕开这个坑。
 
 > 也可以用仓库自带的发布脚本（它会串起前端 → portable → 校验 → 打包）：
 > `bash desktop/package-release.sh windows-amd64`。

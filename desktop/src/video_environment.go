@@ -44,7 +44,22 @@ func environmentErrorCode(code string) string {
 	}
 }
 
+// sanitizeEnvironmentInstallerURL validates the baked-in component manifest
+// location. The value may hold several comma-separated mirrors: the client
+// tries them in turn, and a single dead node must not block the install.
+// Every entry is validated on its own — one malformed entry must not throw
+// the whole list away.
 func sanitizeEnvironmentInstallerURL(raw string) string {
+	entries := manifestURLs(raw)
+	if len(entries) == 0 {
+		return ""
+	}
+	return strings.Join(entries, ",")
+}
+
+// sanitizeInstallerURL validates a single manifest URL. Only http and https
+// are allowed, and the URL may not carry credentials or a fragment.
+func sanitizeInstallerURL(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return ""

@@ -83,6 +83,10 @@ RUNTIME_DIR="${OCTOP_VC_RUNTIME_DIR:-$REPO_ROOT/desktop/src/video-runtime}"
 DEPLOY_USER="${OCTOP_VC_DEPLOY_USER:-root}"
 DEPLOY_PORT="${OCTOP_VC_DEPLOY_PORT:-13122}"
 CURL_NOPROXY="${OCTOP_VC_CURL_NOPROXY:-1}"
+# Parallel range requests per part. The download host throttles one connection
+# to a few hundred KB/s while its nodes are independent machines, so several
+# ranges are what turn a 110 MB part into a couple of minutes.
+CONNECTIONS="${OCTOP_VC_CONNECTIONS:-4}"
 
 BASE_URL=""
 MIRROR_URLS=()
@@ -120,6 +124,7 @@ while (($#)); do
     --shards-zip)     SHARDS_ZIP="${2:-}"; shift 2 ;;
     --version)        VERSION="${2:-}"; shift 2 ;;
     --target)         TARGET="${2:-}"; shift 2 ;;
+    --connections)    CONNECTIONS="${2:-}"; shift 2 ;;
     --web-root)       WEB_ROOT="${2:-}"; shift 2 ;;
     --host)           DEPLOY_HOSTS+=("${2:-}"); shift 2 ;;
     --user)           DEPLOY_USER="${2:-}"; shift 2 ;;
@@ -179,6 +184,7 @@ info "target      = $TARGET"
 info "version     = $VERSION"
 info "base-url    = $BASE_URL  (primary)"
 for mirror in "${MIRROR_URLS[@]}"; do info "mirror      = $mirror"; done
+info "connections = $CONNECTIONS  (parallel range requests per part)"
 info "manifest    = $MANIFEST_URL"
 if [ "$DO_UPLOAD" -eq 1 ] || [ "$VERIFY_ONLY" -eq 1 ]; then
   info "remote dir  = ${WEB_ROOT%/}/${BASE_PATH}"
@@ -236,7 +242,7 @@ if [ "$DO_PACK" -eq 1 ]; then
     for mirror in "${MIRROR_URLS[@]}"; do
       PACK_ARGS+=(--base-url "$mirror")
     done
-    PACK_ARGS+=(--out-dir "$OUT_DIR" --runtime-dir "$RUNTIME_DIR")
+    PACK_ARGS+=(--out-dir "$OUT_DIR" --runtime-dir "$RUNTIME_DIR" --connections "$CONNECTIONS")
     "$PY" "$REPO_ROOT/scripts/pack_video_components.py" "${PACK_ARGS[@]}" || die "打包失败"
 
     # 两包是硬要求：缺 browser part 说明 headless-shell 没 staged，拒绝发布不完整清单
