@@ -98,6 +98,96 @@ func TestComponentsDownloadClientPinsReachableNode(t *testing.T) {
 	}
 }
 
+func TestComponentSchemeSamples(t *testing.T) {
+	got := componentSchemeSamples([]string{
+		"https://dw.mengxa.com/vc/manifest.json",
+		"http://dw.mengxa.com/vc/manifest.json",
+		"https://dw.mengxa.com/other.json",
+		"not a url",
+	})
+	want := map[string]string{
+		"dw.mengxa.com|https": "https://dw.mengxa.com/vc/manifest.json",
+		"dw.mengxa.com|http":  "http://dw.mengxa.com/vc/manifest.json",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("componentSchemeSamples() = %#v, want %#v", got, want)
+	}
+}
+
+// The port decides which nodes may serve a request: a node that is only
+// reachable over plain HTTP says nothing about its TLS setup.
+func TestComponentSamplePort(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://dw.mengxa.com/vc/manifest.json": "443",
+		"http://dw.mengxa.com/vc/manifest.json":  "80",
+		"https://dw.mengxa.com:8443/vc/m.json":   "8443",
+		"http://dw.mengxa.com:8080/vc/m.json":    "8080",
+	} {
+		if got := componentSamplePort(input); got != want {
+			t.Errorf("componentSamplePort(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestContainsString(t *testing.T) {
+	if !containsString([]string{"a", "b"}, "b") {
+		t.Fatal("containsString() missed a present entry")
+	}
+	if containsString([]string{"a", "b"}, "c") {
+		t.Fatal("containsString() found an absent entry")
+	}
+	if containsString(nil, "a") {
+		t.Fatal("containsString() found an entry in an empty list")
+	}
+}
+
+// The nodes that failed the probe must not be handed out round-robin: they
+// may accept the TCP connect while failing the TLS handshake, which would
+// kill the request without a chance to fall back to the next node.
+func TestComponentsDownloadClientSkipsUnprobedNodes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"version":"1.4.0","parts":[]}`)
+	}))
+	defer server.Close()
+	host, port, err := serverAddrHostPort(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadHost := "127.0.0.2"
+
+	originalLookup := componentLookupHost
+	componentLookupHost = func(_ context.Context, name string) ([]string, error) {
+		if name != deadHost {
+			return nil, fmt.Errorf("unexpected lookup of %s", name)
+		}
+		// The dead address comes first, so only the probe can push it back.
+		return []string{deadHost, host}, nil
+	}
+	t.Cleanup(func() { componentLookupHost = originalLookup })
+
+	client := componentsDownloadClient(
+		[]string{fmt.Sprintf("http://%s:%s/vc/manifest.json", deadHost, port)},
+		func(format string, args ...any) { t.Logf(format, args...) },
+	)
+	if _, ok := client.Transport.(*http.Transport); !ok {
+		t.Fatalf("unexpected transport %T", client.Transport)
+	}
+
+	// Open a few connections. Each of them must reach the live server; if
+	// the dead address were picked, the request would fail.
+	for i := 0; i < 4; i++ {
+		resp, err := client.Get(fmt.Sprintf("http://%s:%s/vc/manifest.json", deadHost, port))
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected response: status=%d body=%q err=%v", resp.StatusCode, body, readErr)
+		}
+	}
+}
+
 func serverAddrHostPort(rawURL string) (string, string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {

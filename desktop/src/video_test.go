@@ -348,6 +348,28 @@ func TestVideoInstallerURLIsHTTPOnly(t *testing.T) {
 	}
 }
 
+// The baked-in location may list several mirrors. Each entry is validated on
+// its own, so one bad entry must not throw the whole list away — and the
+// list must never survive as a single malformed URL.
+func TestVideoInstallerURLKeepsValidMirrors(t *testing.T) {
+	got := manifestURLs("https://a.test/m.json, file:///tmp/x, http://b.test/m.json,https://a.test/m.json")
+	want := []string{"https://a.test/m.json", "http://b.test/m.json"}
+	if len(got) != len(want) {
+		t.Fatalf("manifestURLs() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("manifestURLs() = %#v, want %#v", got, want)
+		}
+	}
+	if joined := sanitizeEnvironmentInstallerURL("https://a.test/m.json, http://b.test/m.json"); joined != "https://a.test/m.json,http://b.test/m.json" {
+		t.Fatalf("sanitizeEnvironmentInstallerURL() = %q", joined)
+	}
+	if got := sanitizeEnvironmentInstallerURL("file:///tmp/x, javascript:alert(1)"); got != "" {
+		t.Fatalf("sanitizeEnvironmentInstallerURL() accepted %q", got)
+	}
+}
+
 func TestVideoEnvironmentMissingRuntimeRequestsComponents(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("OCTOP_HOME", root)

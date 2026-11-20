@@ -159,13 +159,33 @@ wails3 task package ARCH=amd64 VERSION=1.4.0 \
 > 返回 `NO_INSTALLER`。线上可用地址见 `scripts/release-video-components.sh` 输出。
 
 > ★ **2026-11-20 实测：manifest URL 必须烘焙多节点**。`dw.mengxa.com` 的 DNS 轮询到
-> `175.178.192.87` 时 **HTTPS 握手失败**（该节点只服务 HTTP），`8.134.147.195` 的
-> **证书已过期**——只烘焙单个 HTTPS URL 时，「一键安装」约有 1/3 概率取不到 manifest。
+> 四个 IP，各节点的 TLS/站点配置**并不一致**（实测复核结论）：
+>
+> | IP | HTTPS | HTTP | 说明 |
+> |---|---|---|---|
+> | `1.14.182.208` | ✅ 200（`CN=dw.mengxa.com`，Let's Encrypt YE1） | ✅ 206 | 正常节点，≈640 KB/s |
+> | `175.178.33.107` | ✅ 200（同上，证书一致） | 301 | 正常节点，≈370 KB/s |
+> | `175.178.192.87` | ❌ SNI 不匹配（`tlsv1 unrecognized name`） | ✅ 206 | **只服务 HTTP**，nginx 没有 `dw.mengxa.com` 的 server 块，≈644 KB/s |
+> | `8.134.147.195` | ❌ 证书为 `CN=ymxt.top` 且 2026-07-29 已过期 | 403 | **阿里云 ICP 拦截机**，根本不是本站点 |
+>
+> ⚠️ **`8.134.147.195` 是 DNS 层面的根因**：`http://dw.mengxa.com` 走默认 DNS 轮询会命中它，
+> 于是拿到 403 拦截页而不是文件。把它从 `dw.mengxa.com` 的 DNS 记录里摘掉，
+> `http://dw.mengxa.com` 才能像 `https://` 一样直接可用。
+>
 > 客户端的 `componentsDownloadClient` 会逐 IP 探测并自动避开坏节点，所以只要 URL 列表里
-> 含有可达节点即可。**推荐烘焙三档**：
+> 含有可达节点即可。**推荐烘焙双 scheme（同域名）**：
 > ```bash
-> VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://175.178.192.87/video-components/1.4.0/win-x64/manifest.json"
+> VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json"
 > ```
+>
+> **探测按 (host, scheme) 分别进行**：只探 HTTPS 会把「只服务 HTTP」的好节点误判为死节点，
+> 白丢一半带宽；客户端因此按 `host|scheme` 分组探测，并**按端口维护可用节点列表** ——
+> HTTP-only 的节点不会被派给 :443 连接（它的 TLS 从未验证过）。
+>
+> **part 下载会并行开多个 Range 连接**（默认 4 路，见 `videoComponentConnections`），
+> 连接轮询分配到不同的可达 IP，**各个分片轮流使用 part 的不同镜像**（两个镜像往往是两台不同的机器，
+> 一台机器会把单连接限速在几百 KB/s）。实测总带宽从单连接的 ≈620 KB/s 提升到 ≈1.35 MB/s（**2.2 倍**）。
+> manifest 里的 `connections` 字段可覆盖默认连接数（由 `pack_video_components.py --connections` 写入）。
 
 ### 3.6 打绿色版（默认交付物）
 
@@ -178,7 +198,7 @@ wails3 task windows:generate:syso ARCH=amd64 VERSION=1.4.1
 GOOS=windows CGO_ENABLED=0 GOARCH=amd64 go build -tags production,thin -trimpath -buildvcs=false \
   -ldflags="-w -s -H windowsgui \
     -X main.defaultServerURL=https://ocbot.aixifs.com/videogen \
-    -X main.defaultVideoComponentsURL=https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://175.178.192.87/video-components/1.4.0/win-x64/manifest.json" \
+    -X main.defaultVideoComponentsURL=https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json" \
   -o bin/Octop.exe .
 
 # 2) 组装绿色包

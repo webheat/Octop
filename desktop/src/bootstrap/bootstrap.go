@@ -42,6 +42,13 @@ type Part struct {
 	Append bool `json:"append,omitempty"`
 	// Required parts must be installed before the runtime can start.
 	Required bool `json:"required"`
+	// Connections is how many parallel range requests this part is fetched
+	// with. One means the classic single-stream download. More than one
+	// splits the archive into that many byte ranges that are fetched at the
+	// same time — the origin usually throttles per connection, so this is
+	// what turns a 600 KB/s stream into a multi-megabyte one. The result is
+	// byte-identical either way.
+	Connections int `json:"connections,omitempty"`
 }
 
 // Manifest is everything a slim installer needs to build its runtime.
@@ -99,6 +106,10 @@ type Options struct {
 	// follows must live under a distinct Target. This is how the video runtime
 	// installs a core part plus an optional headless-shell subtree.
 	Merge bool
+	// Connections is the default number of parallel range requests per part.
+	// A part that does not set its own value uses this one; zero means one
+	// connection (the classic single-stream download).
+	Connections int
 }
 
 const (
@@ -136,6 +147,9 @@ func Run(opts Options) error {
 	}
 	if opts.Attempts <= 0 {
 		opts.Attempts = DefaultAttempts
+	}
+	if opts.Connections <= 0 {
+		opts.Connections = 1
 	}
 	if len(opts.Backoff) == 0 {
 		opts.Backoff = DefaultBackoff
@@ -221,6 +235,11 @@ func (f *fetcher) install(part Part, state *State, statePath string) error {
 	archive := f.archivePath(part)
 	if err := os.MkdirAll(filepath.Dir(archive), 0o755); err != nil {
 		return err
+	}
+
+	// A part without its own connection count uses the run-wide default.
+	if part.Connections <= 0 {
+		part.Connections = f.opts.Connections
 	}
 
 	cached, cachedOK := state.Parts[part.ID]

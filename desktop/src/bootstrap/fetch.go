@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,6 +41,23 @@ func DefaultClient() *http.Client {
 type fetcher struct {
 	opts Options
 	log  func(format string, args ...any)
+	// progressMu serializes the progress callback. A parallel download
+	// reports from several goroutines at once, and callers are free to keep
+	// their state in a map — two concurrent writes to the same map crash
+	// the whole process, so the callback must never run in parallel.
+	progressMu sync.Mutex
+}
+
+// report publishes one progress tick. The call happens under a lock, so a
+// caller may read and write its own state inside the callback without
+// synchronising it.
+func (f *fetcher) report(progress Progress) {
+	if f.opts.Progress == nil {
+		return
+	}
+	f.progressMu.Lock()
+	defer f.progressMu.Unlock()
+	f.opts.Progress(progress)
 }
 
 // fetch downloads one part to dest. It tries every mirror in order and
@@ -93,7 +112,42 @@ func (f *fetcher) backoff(attempt int) time.Duration {
 
 // download fetches url into dest, resuming a partial file when the server
 // supports range requests.
+//
+// A single connection saturates the origin's per-connection limit, so a big
+// archive crawls at whatever one stream delivers. When the part asks for
+// several connections the file is split into byte ranges that are fetched
+// concurrently; the chunks land in separate part files and are concatenated
+// afterwards. The result is byte-identical to the single-connection path —
+// the checksum still decides whether it is acceptable.
 func (f *fetcher) download(url string, part Part, dest string) error {
+	connections := part.Connections
+	if connections <= 1 {
+		return f.downloadSingle(url, part, dest)
+	}
+	// A part without a declared size cannot be split into ranges.
+	if part.Size <= 0 {
+		f.log("bootstrap: part %q has no size, downloading on a single connection", part.ID)
+		return f.downloadSingle(url, part, dest)
+	}
+	err := f.downloadParallel(url, part, dest, connections)
+	if err == nil {
+		return nil
+	}
+	// The parallel path needs a server that honours Range requests. If it
+	// does not, fall back to the plain download instead of failing.
+	if errors.Is(err, errNoRangeSupport) {
+		f.log("bootstrap: %s does not support range requests, falling back to one connection", url)
+		return f.downloadSingle(url, part, dest)
+	}
+	return err
+}
+
+// errNoRangeSupport marks a mirror that cannot serve byte ranges.
+var errNoRangeSupport = errors.New("runtime download: the server does not support range requests")
+
+// downloadSingle fetches the whole file on one connection, resuming a
+// partial file when the server supports range requests.
+func (f *fetcher) downloadSingle(url string, part Part, dest string) error {
 	offset := int64(0)
 	if info, err := os.Stat(dest); err == nil {
 		offset = info.Size()
@@ -149,10 +203,10 @@ func (f *fetcher) download(url string, part Part, dest string) error {
 	}
 	writer := &progressWriter{
 		out:     out,
-		f:       f,
-		part:    part,
-		total:   total,
-		written: offset,
+		f:        f,
+		part:     part,
+		total:    total,
+		written:  offset,
 	}
 	buf := make([]byte, 1<<20)
 	for {
@@ -189,6 +243,281 @@ func (f *fetcher) download(url string, part Part, dest string) error {
 	return nil
 }
 
+// chunk is one byte range of a part, downloaded by a single connection.
+type chunk struct {
+	index int
+	start int64
+	end   int64 // inclusive
+	path  string
+}
+
+// chunkTracker keeps the byte counters of the parallel chunks of one part.
+//
+// The chunks run concurrently, so their counters are guarded by a mutex. The
+// tracker reports the total number of bytes of the part that are available,
+// which is what the progress callback needs: the single-connection path
+// reports the bytes of the whole file, and a parallel run must not look like
+// it jumped to the end because the last range finished first.
+type chunkTracker struct {
+	mu       sync.Mutex
+	perChunk map[int]int64
+	base     int64
+	size     int64
+	last     int
+}
+
+// newChunkTracker returns a tracker for the given chunks. base is the number
+// of bytes of the part that were already on disk when the attempt started.
+func newChunkTracker(chunks []chunk, base int64, size int64) *chunkTracker {
+	return &chunkTracker{
+		perChunk: make(map[int]int64, len(chunks)),
+		base:     base,
+		size:     size,
+	}
+}
+
+// add records the bytes a chunk delivered and returns the total number of
+// bytes of the part that are now available.
+func (t *chunkTracker) add(index int, written int64) int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.perChunk[index] = written
+	done := t.base
+	for _, value := range t.perChunk {
+		done += value
+	}
+	return done
+}
+
+// publish reports the progress of the part. The last percentage is kept so
+// the caller is not woken up for every single percent of a large archive.
+func (t *chunkTracker) publish(part Part, done int64, report func(Progress)) {
+	if report == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.size <= 0 {
+		return
+	}
+	percent := int(done * 100 / t.size)
+	if percent > 100 {
+		percent = 100
+	}
+	if percent == t.last {
+		return
+	}
+	t.last = percent
+	report(Progress{PartID: part.ID, Received: done, Total: t.size})
+}
+
+// downloadParallel splits the part into `connections` byte ranges and
+// fetches them at the same time.
+//
+// Each range is written to its own file next to the destination. The files
+// are concatenated once every range arrived, so the destination only ever
+// holds a complete archive — a crash mid-download never leaves a truncated
+// file that a later run would mistake for a resumable one.
+//
+// The ranges are spread over the part's mirrors: two mirrors of the same
+// host are often two different machines, and one machine caps a single
+// connection at a few hundred KB/s. Giving every range its own mirror is
+// what turns that cap into usable bandwidth.
+func (f *fetcher) downloadParallel(url string, part Part, dest string, connections int) error {
+	chunks := planChunks(part.Size, connections)
+	chunkDir := dest + ".parts"
+	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(chunkDir)
+
+	// A stale chunk from an earlier attempt must not be reused blindly: the
+	// file may have changed size since. Drop the directory content first.
+	if err := clearDir(chunkDir); err != nil {
+		return err
+	}
+
+	tracker := newChunkTracker(chunks, 0, part.Size)
+
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+	for i := range chunks {
+		// The path must be written back into the slice: the concatenation
+		// step reads it from there.
+		chunks[i].path = filepath.Join(chunkDir, fmt.Sprintf("%04d.part", chunks[i].index))
+		c := chunks[i]
+		// Round-robin the mirrors: range 0 takes the primary, range 1 the
+		// first mirror, and so on.
+		mirror := url
+		if len(part.URLs) > 0 {
+			mirror = part.URLs[c.index%len(part.URLs)]
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := f.downloadRange(mirror, part, c, tracker); err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+
+	return concatChunks(chunks, dest)
+}
+
+// planChunks divides size into at most `connections` ranges of roughly equal
+// length. The last chunk absorbs the remainder.
+func planChunks(size int64, connections int) []chunk {
+	if connections < 1 {
+		connections = 1
+	}
+	if size <= 0 {
+		return nil
+	}
+	// Very small files are not worth splitting — the request overhead would
+	// cost more than the parallelism gains.
+	const minChunkSize = 1 << 20
+	if size < int64(connections)*minChunkSize {
+		connections = int(size / minChunkSize)
+		if connections < 1 {
+			connections = 1
+		}
+	}
+	chunkSize := size / int64(connections)
+	chunks := make([]chunk, 0, connections)
+	for i := 0; i < connections; i++ {
+		start := int64(i) * chunkSize
+		end := start + chunkSize - 1
+		if i == connections-1 {
+			end = size - 1
+		}
+		chunks = append(chunks, chunk{index: i, start: start, end: end})
+	}
+	return chunks
+}
+
+// downloadRange fetches one byte range into the chunk's own file.
+func (f *fetcher) downloadRange(url string, part Part, c chunk, tracker *chunkTracker) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", c.start, c.end))
+	resp, err := f.opts.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		// The only acceptable answer for a ranged request.
+	case http.StatusOK:
+		// The server ignored the Range header and sent the whole file. The
+		// single-connection path can still handle that.
+		return errNoRangeSupport
+	case http.StatusRequestedRangeNotSatisfiable:
+		return fmt.Errorf("runtime download: the server refused the range %d-%d", c.start, c.end)
+	case http.StatusNotFound, http.StatusGone:
+		return errNotFound
+	default:
+		return fmt.Errorf("runtime download failed: HTTP %d", resp.StatusCode)
+	}
+
+	start, err := rangeStart(resp.Header.Get("Content-Range"))
+	if err != nil {
+		return err
+	}
+	if start != c.start {
+		return fmt.Errorf("runtime download: the server started at %d, expected %d", start, c.start)
+	}
+
+	out, err := os.OpenFile(c.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	written := int64(0)
+	expected := c.end - c.start + 1
+	buf := make([]byte, 1<<20)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := out.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			written += int64(n)
+			// The tracker sums the bytes of every chunk, so the reported
+			// figure grows with the part as a whole instead of jumping to
+			// the end of the range that happens to finish first.
+			done := tracker.add(c.index, written)
+			// The parallel path writes its own chunk files, so the size cap
+			// that guards the single-connection path has to be enforced
+			// here as well — otherwise a wrong URL could fill the disk.
+			if f.opts.MaxBytes > 0 && done > f.opts.MaxBytes {
+				return fmt.Errorf("runtime download exceeded %d bytes", f.opts.MaxBytes)
+			}
+			tracker.publish(part, done, f.report)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+	if written != expected {
+		return fmt.Errorf("runtime download: the range %d-%d delivered %d bytes, expected %d", c.start, c.end, written, expected)
+	}
+	return nil
+}
+
+// concatChunks joins the downloaded ranges into the destination file.
+func concatChunks(chunks []chunk, dest string) error {
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	for _, c := range chunks {
+		in, err := os.Open(c.path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			in.Close()
+			return err
+		}
+		in.Close()
+	}
+	return out.Close()
+}
+
+// clearDir removes every file in a directory but keeps the directory itself.
+func clearDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // progressWriter forwards the download to the file while reporting progress
 // and enforcing the size cap.
 type progressWriter struct {
@@ -213,13 +542,13 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 		if p.total > 0 {
 			if percent := progress.Percent(); percent != p.last {
 				p.last = percent
-				p.f.opts.Progress(progress)
+				p.f.report(progress)
 			}
 		} else if p.written-p.lastStep >= 4<<20 {
 			// The server did not say how big the file is — report every few
 			// megabytes instead of every percent.
 			p.lastStep = p.written
-			p.f.opts.Progress(progress)
+			p.f.report(progress)
 		}
 	}
 	return n, err

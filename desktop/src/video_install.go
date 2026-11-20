@@ -59,6 +59,13 @@ func componentsManifestPlatform() string {
 	return "win-x64"
 }
 
+// videoComponentConnections is how many range requests a component part is
+// fetched with. The component host limits a single connection to roughly
+// 600 KB/s, while its nodes are independent machines whose bandwidth adds
+// up — so several connections over several nodes are what make the install
+// finish in minutes instead of a quarter of an hour.
+const videoComponentConnections = 4
+
 func environmentProgress(value float64) *float64 { return &value }
 
 // manifestURLs splits a comma-separated URL list and sanitizes each entry.
@@ -69,7 +76,7 @@ func manifestURLs(raw string) []string {
 	var result []string
 	seen := make(map[string]bool)
 	for _, part := range strings.Split(raw, ",") {
-		clean := sanitizeEnvironmentInstallerURL(part)
+		clean := sanitizeInstallerURL(part)
 		if clean == "" || seen[clean] {
 			continue
 		}
@@ -200,7 +207,12 @@ func (m *videoManager) runEnvironmentInstall(manifestURLs []string) {
 		Manifest: manifest,
 		Client:   installClient,
 		Merge:    true,
-		Progress: report,
+		// The component host throttles per connection, so a single stream
+		// only reaches a fraction of the available bandwidth. Several
+		// parallel range requests — spread over the independent nodes by the
+		// client above — turn a ~600 KB/s crawl into a multi-megabyte one.
+		Connections: videoComponentConnections,
+		Progress:    report,
 		Log: func(format string, args ...any) {
 			navLogf("video install: "+format, args...)
 		},

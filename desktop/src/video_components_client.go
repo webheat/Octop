@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"octop.desktop/bootstrap"
@@ -24,8 +25,13 @@ import (
 
 const (
 	componentProbeTimeout = 2500 * time.Millisecond
-	componentProbeBudget  = 4 * time.Second
-	componentDialTimeout  = 4 * time.Second
+	// componentProbeBudget is the total time the probes may take. Every
+	// scheme of a host is probed separately, so the budget has to cover
+	// more than one round: a host reachable over both http and https needs
+	// two rounds, and the second one must not be cut short by an exhausted
+	// budget.
+	componentProbeBudget = 12 * time.Second
+	componentDialTimeout = 4 * time.Second
 )
 
 type componentProbeResult struct {
@@ -39,9 +45,14 @@ var componentLookupHost = func(ctx context.Context, host string) ([]string, erro
 	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
-// componentHostSamples maps a lowercase hostname to one manifest URL on it.
-// Ports are deliberately not part of the key: an HTTP manifest on :80 may
-// redirect to HTTPS on :443, and both must use the same probed address list.
+// componentHostSamples maps a lowercase hostname to one sample URL on it.
+//
+// A host may appear with more than one scheme. The schemes are probed
+// separately: a node that serves the archive over plain HTTP but has no
+// certificate for the domain (or a certificate that does not match) must
+// not be written off as dead — it is one of the fastest nodes for the
+// plain-HTTP URLs. The first URL of a host wins the sample slot; the extra
+// schemes are collected in componentSchemeSamples.
 func componentHostSamples(manifestURLs []string) map[string]string {
 	samples := make(map[string]string)
 	for _, raw := range manifestURLs {
@@ -55,6 +66,39 @@ func componentHostSamples(manifestURLs []string) map[string]string {
 		}
 	}
 	return samples
+}
+
+// componentSchemeSamples maps "host|scheme" to one sample URL on it.
+func componentSchemeSamples(manifestURLs []string) map[string]string {
+	samples := make(map[string]string)
+	for _, raw := range manifestURLs {
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		name := strings.ToLower(u.Hostname()) + "|" + strings.ToLower(u.Scheme)
+		if _, exists := samples[name]; !exists {
+			samples[name] = raw
+		}
+	}
+	return samples
+}
+
+// componentSamplePort returns the port a sample URL talks to. The port
+// decides which nodes may be used: a node reachable on :80 says nothing
+// about its TLS setup on :443.
+func componentSamplePort(sample string) string {
+	u, err := url.Parse(sample)
+	if err != nil {
+		return ""
+	}
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 // componentProbeURL fetches a small prefix of the manifest. Status codes at or
@@ -149,6 +193,16 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
+// containsString reports whether values holds the given entry.
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // componentsDownloadClient returns the client used for both the manifest and
 // the part downloads. When a hostname has multiple addresses, its transport
 // dials the probed addresses in order instead of letting DNS pick blindly.
@@ -169,8 +223,22 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *
 	ctx, cancel := context.WithTimeout(context.Background(), componentProbeBudget)
 	defer cancel()
 
+	// The scheme matters: a node can serve the plain-HTTP URL perfectly
+	// while its TLS setup is broken (a missing or expired certificate for
+	// the domain). Probing only the HTTPS variant would write off one of
+	// the fastest nodes, so every (host, scheme) pair gets its own probe.
+	schemeSamples := componentSchemeSamples(manifestURLs)
+
 	pinned := make(map[string][]string, len(samples))
-	for hostname, sample := range samples {
+	// healthyOrder holds the nodes that answered a probe, per host and
+	// port. The port matters: a node can serve the plain-HTTP URL perfectly
+	// while its TLS setup is broken (no certificate for the domain), so the
+	// nodes reachable on :80 must not be handed to a :443 connection — the
+	// handshake would fail and the request would die. The round-robin dialer
+	// prefers these; pinned keeps the full list so a failed node can still
+	// be tried as a last resort.
+	healthyOrder := make(map[string][]string, len(samples))
+	for hostname := range samples {
 		ips, err := componentLookupHost(ctx, hostname)
 		if err != nil {
 			log("video install: DNS lookup of %s failed: %v", hostname, err)
@@ -181,21 +249,53 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *
 			// One address offers no alternative; keep the stock resolver.
 			continue
 		}
-		results := probeComponentIPs(ctx, base, hostname, ips, sample)
-		order := orderedComponentIPs(ips, results)
-		pinned[hostname] = order
-		details := make([]string, 0, len(ips))
-		for _, ip := range ips {
-			if result := results[ip]; result.Err == nil {
-				details = append(details, fmt.Sprintf("%s %dms", ip, result.Latency.Milliseconds()))
-			} else {
-				details = append(details, fmt.Sprintf("%s failed (%v)", ip, result.Err))
+		// Probe every scheme this host is reachable under. The nodes are
+		// kept per port, so an HTTP-only node never ends up on the list
+		// used for HTTPS connections.
+		merged := map[string]componentProbeResult{}
+		healthyByPort := map[string][]string{}
+		for key, schemeSample := range schemeSamples {
+			if !strings.HasPrefix(key, hostname+"|") {
+				continue
 			}
+			results := probeComponentIPs(ctx, base, hostname, ips, schemeSample)
+			details := make([]string, 0, len(ips))
+			healthy := make([]string, 0, len(ips))
+			for _, ip := range ips {
+				result, ok := results[ip]
+				if !ok {
+					continue
+				}
+				if previous, seen := merged[ip]; !seen || (previous.Err != nil && result.Err == nil) {
+					merged[ip] = result
+				}
+				if result.Err == nil {
+					healthy = append(healthy, ip)
+					details = append(details, fmt.Sprintf("%s %dms", ip, result.Latency.Milliseconds()))
+				} else {
+					details = append(details, fmt.Sprintf("%s failed (%v)", ip, result.Err))
+				}
+			}
+			if len(healthy) > 0 {
+				port := componentSamplePort(schemeSample)
+				healthyByPort[port] = healthy
+			}
+			log("video install: probed %s: %s", key, strings.Join(details, ", "))
 		}
-		log("video install: probed %s: %s", hostname, strings.Join(details, ", "))
+		order := orderedComponentIPs(ips, merged)
+		pinned[hostname] = order
+		for port, healthy := range healthyByPort {
+			healthyOrder[hostname+"|"+port] = healthy
+		}
 	}
 	if len(pinned) == 0 {
 		return client
+	}
+	if len(healthyOrder) == 0 {
+		// No node passed the probe. Fall back to the full list: the nodes may
+		// have recovered since, and the ordered list still tries the fastest
+		// ones first.
+		log("video install: no node passed the probe, trying every address in turn")
 	}
 
 	defaultDial := base.DialContext
@@ -203,17 +303,54 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *
 		defaultDial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
 	}
 	transport := base.Clone()
+	// The healthy addresses are handed out round-robin instead of always
+	// starting at the fastest one. A single download keeps using the best
+	// node, but a parallel range download opens several connections at once
+	// — round-robin spreads those connections over the independent nodes
+	// instead of piling them onto one origin and hitting that machine's
+	// bandwidth ceiling.
+	var counter uint64
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		addrHost, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return defaultDial(ctx, network, addr)
 		}
-		order, ok := pinned[strings.ToLower(addrHost)]
+		host := strings.ToLower(addrHost)
+		order, ok := pinned[host]
 		if !ok {
 			return defaultDial(ctx, network, addr)
 		}
+		// Prefer the nodes that passed the probe on this very port. A node
+		// that failed the probe may still accept the TCP connect while
+		// failing the TLS handshake (an expired certificate), so picking it
+		// would kill the request without a chance to fall back to the next
+		// node. An HTTP-only node must not be picked for a :443 connection
+		// either — its TLS setup was never verified.
+		preferred := order
+		portHealthy := false
+		if healthy, ok := healthyOrder[host+"|"+port]; ok && len(healthy) > 0 {
+			preferred = healthy
+			portHealthy = true
+		}
+		// Start at a different node for every connection so parallel range
+		// requests land on separate machines.
+		start := int(atomic.AddUint64(&counter, 1)-1) % len(preferred)
+		candidates := make([]string, 0, len(preferred))
+		for i := 0; i < len(preferred); i++ {
+			candidates = append(candidates, preferred[(start+i)%len(preferred)])
+		}
+		if !portHealthy {
+			// No node was verified on this port. Try the remaining
+			// addresses anyway — they may have recovered — but only after
+			// the ones that did answer.
+			for _, ip := range order {
+				if !containsString(preferred, ip) {
+					candidates = append(candidates, ip)
+				}
+			}
+		}
 		var lastErr error
-		for _, ip := range order {
+		for _, ip := range candidates {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}

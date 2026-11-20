@@ -88,7 +88,14 @@ func videoBridgeJS(base, nonce string) string {
 	if minimalModeEnabled() {
 		minimalMode = "true"
 	}
-	return `(function(){try{if(window.location.origin!==` + jsonString(origin) + `||!(window.location.pathname===` + jsonString(path) + `||window.location.pathname.indexOf(` + jsonString(strings.TrimRight(path, "/")+"/") + `)===0))return;if(!window._wails||typeof window._wails.invoke!=="function")return;if(window.__octopDesktopVideoInstalled)return;window.__octopDesktopVideoInstalled=true;var nonce=` + jsonString(nonce) + `,seq=0,pending=new Map();window.addEventListener("octop:desktop-video-response",function(e){var d=e.detail||{},p=pending.get(d.id);if(!p)return;pending.delete(d.id);d.error?p.reject(Object.assign(new Error(d.error),{code:d.error})):p.resolve(d.result)});window.octopDesktopVideo={version:1,minimalMode:` + minimalMode + `,environmentVersion:1,environmentInstallerURL:` + jsonString(sanitizeEnvironmentInstallerURL(defaultVideoComponentsURL)) + `,request:function(action,payload){return new Promise(function(resolve,reject){var id=String(++seq)+"-"+Math.random().toString(36).slice(2);pending.set(id,{resolve:resolve,reject:reject});var body=JSON.stringify({id:id,action:action,payload:payload||{}});window._wails.invoke("wails:event:emit:desktop:video:"+nonce+":"+encodeURIComponent(body))})}}}catch(e){}})();`
+	// The frontend receives the primary mirror only. The full list of
+	// mirrors stays on the Go side, where the installer tries them in turn
+	// — a comma-separated list would be meaningless to the page.
+	installerURL := ""
+	if mirrors := manifestURLs(defaultVideoComponentsURL); len(mirrors) > 0 {
+		installerURL = mirrors[0]
+	}
+	return `(function(){try{if(window.location.origin!==` + jsonString(origin) + `||!(window.location.pathname===` + jsonString(path) + `||window.location.pathname.indexOf(` + jsonString(strings.TrimRight(path, "/")+"/") + `)===0))return;if(!window._wails||typeof window._wails.invoke!=="function")return;if(window.__octopDesktopVideoInstalled)return;window.__octopDesktopVideoInstalled=true;var nonce=` + jsonString(nonce) + `,seq=0,pending=new Map();window.addEventListener("octop:desktop-video-response",function(e){var d=e.detail||{},p=pending.get(d.id);if(!p)return;pending.delete(d.id);d.error?p.reject(Object.assign(new Error(d.error),{code:d.error})):p.resolve(d.result)});window.octopDesktopVideo={version:1,minimalMode:` + minimalMode + `,environmentVersion:1,environmentInstallerURL:` + jsonString(installerURL) + `,request:function(action,payload){return new Promise(function(resolve,reject){var id=String(++seq)+"-"+Math.random().toString(36).slice(2);pending.set(id,{resolve:resolve,reject:reject});var body=JSON.stringify({id:id,action:action,payload:payload||{}});window._wails.invoke("wails:event:emit:desktop:video:"+nonce+":"+encodeURIComponent(body))})}}}catch(e){}})();`
 }
 func videoResponseJS(b []byte) string {
 	return `window.dispatchEvent(new CustomEvent("octop:desktop-video-response",{detail:` + string(b) + `}))`
