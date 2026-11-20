@@ -163,10 +163,14 @@ wails3 task package ARCH=amd64 VERSION=1.4.0 \
 >
 > | IP | HTTPS | HTTP | 说明 |
 > |---|---|---|---|
-> | `1.14.182.208` | ✅ 200（`CN=dw.mengxa.com`，Let's Encrypt YE1） | ✅ 206 | 正常节点，≈640 KB/s |
-> | `175.178.33.107` | ✅ 200（同上，证书一致） | 301 | 正常节点，≈370 KB/s |
-> | `175.178.192.87` | ❌ SNI 不匹配（`tlsv1 unrecognized name`） | ✅ 206 | **只服务 HTTP**，nginx 没有 `dw.mengxa.com` 的 server 块，≈644 KB/s |
+> | `1.14.182.208` | ✅ 200（`CN=dw.mengxa.com`，Let's Encrypt YE1） | ✅ 206 | 正常节点，≈649 KB/s |
+> | `175.178.33.107` | ✅ 200（同上，证书一致） | **301 → HTTPS** | HTTPS ≈287 KB/s；**HTTP 端口只做跳转，不直接供文件** |
+> | `175.178.192.87` | ❌ SNI 不匹配（`tlsv1 unrecognized name`） | ✅ 206 | **只服务 HTTP**，nginx 没有 `dw.mengxa.com` 的 server 块，≈696 KB/s |
 > | `8.134.147.195` | ❌ 证书为 `CN=ymxt.top` 且 2026-07-29 已过期 | 403 | **阿里云 ICP 拦截机**，根本不是本站点 |
+>
+> ⚠️ **`175.178.33.107` 的 HTTP 端口只返回 301 跳转到 HTTPS**，不直接提供文件。
+> 探测若跟随重定向就会把它误判为「HTTP 健康节点」—— 所以**探测不跟随重定向**，
+> 3xx 直接算该节点在此 scheme 下不可用。
 >
 > ⚠️ **`8.134.147.195` 是 DNS 层面的根因**：`http://dw.mengxa.com` 走默认 DNS 轮询会命中它，
 > 于是拿到 403 拦截页而不是文件。把它从 `dw.mengxa.com` 的 DNS 记录里摘掉，
