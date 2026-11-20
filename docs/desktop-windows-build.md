@@ -158,6 +158,43 @@ wails3 task package ARCH=amd64 VERSION=1.4.0 \
 > manifest URL **支持逗号分隔多节点**（主 + 镜像容灾），取不到时 `environment_install`
 > 返回 `NO_INSTALLER`。线上可用地址见 `scripts/release-video-components.sh` 输出。
 
+> ★ **2026-11-20 实测：manifest URL 必须烘焙多节点**。`dw.mengxa.com` 的 DNS 轮询到
+> `175.178.192.87` 时 **HTTPS 握手失败**（该节点只服务 HTTP），`8.134.147.195` 的
+> **证书已过期**——只烘焙单个 HTTPS URL 时，「一键安装」约有 1/3 概率取不到 manifest。
+> 客户端的 `componentsDownloadClient` 会逐 IP 探测并自动避开坏节点，所以只要 URL 列表里
+> 含有可达节点即可。**推荐烘焙三档**：
+> ```bash
+> VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://175.178.192.87/video-components/1.4.0/win-x64/manifest.json"
+> ```
+
+### 3.6 打绿色版（默认交付物）
+
+thin 壳编译完后，用仓库脚本组装成**免安装绿色包**（裸 exe + README，无 NSIS）：
+
+```bash
+# 1) 先编译 thin 壳，烘焙后端地址与多节点 manifest URL
+cd desktop/src
+wails3 task windows:generate:syso ARCH=amd64 VERSION=1.4.1
+GOOS=windows CGO_ENABLED=0 GOARCH=amd64 go build -tags production,thin -trimpath -buildvcs=false \
+  -ldflags="-w -s -H windowsgui \
+    -X main.defaultServerURL=https://ocbot.aixifs.com/videogen \
+    -X main.defaultVideoComponentsURL=https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json,http://175.178.192.87/video-components/1.4.0/win-x64/manifest.json" \
+  -o bin/Octop.exe .
+
+# 2) 组装绿色包
+cd ../..
+python scripts/pack_green_client.py \
+  --exe desktop/src/bin/Octop.exe --out-dir desktop/src/bin --version 1.4.1
+# 产物：Octop-green-windows-amd64-1.4.1.zip (5.3 MB) 与 .7z (4.1 MB)
+```
+
+> **绿色包里没有 `video-runtime/` 骨架，这是有意的**：已发布的 `core.zip` 本身就带
+> node.exe、worker 脚本与 Remotion 依赖树，`bootstrap.Run` 会把它解到 exe 同级的
+> `video-runtime/`（目录不存在会自动创建）。再塞一份骨架等于让用户白下载一遍。
+>
+> 打包时注意 **7-Zip 不能把归档写进正在被归档的目录**（会把自己越写越大，实测膨胀到
+> 968 MB）；仓库脚本用临时目录做暂存区绕开这个坑。
+
 > 也可以用仓库自带的发布脚本（它会串起前端 → portable → 校验 → 打包）：
 > `bash desktop/package-release.sh windows-amd64`。
 > 但它走的是远程版/完整版，**slim 变体目前只能直接调 `wails3 task package`**。

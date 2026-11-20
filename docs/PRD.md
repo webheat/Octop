@@ -5,7 +5,7 @@
 > 状态：**活文档（Living Document）** — 随代码演进更新，最新核实 2026-11-20
 > 代码基线：分支 `feat/desktop-direct-chat-panel`，HEAD `019c6e00`
 > 本次复核（2026-11-20）：补入 **§4.1 桌面壳六条产品硬约束（红线）**——
-> S1–S4 启动/登录/引导/依赖 + **S5 绿色版免安装双击即跑、S6 素材与视频能力完整构建进入**；
+> S1–S4 启动/登录/引导/依赖 + **S5 绿色版免安装双击即跑、S6 双击即跑=界面可开+登录可用、不要求功能完整**；
 > 修正 §5「slim 主推」与「界面立即打开」的冲突，并把默认交付形态定为 thin 内核绿色版。
 >
 > 本文回答「产品是什么、为谁服务、要做什么、做到什么程度算完成」。
@@ -162,22 +162,44 @@
 | **S2** | **固定后端 + 微信开放平台登录**：桌面壳固定连接 **`https://ocbot.aixifs.com/videogen`**，登录复用该后端**已实现的微信开放平台网站应用 SSO**（`wechat_open` provider，`open.weixin.qq.com/connect/qrconnect`，scope `snsapi_login`，回调域 `ocbot.aixifs.com`） | 打开即跳到微信官方授权页并签发 JWT；无需用户配置服务器地址、无需本地账号密码登录；**不新造登录**（主干已实现，见下方说明） | 让用户手填后端地址、弹本地注册/密码登录、连非 `ocbot.aixifs.com` 的实例、把后端地址做成可选项、**自绘二维码或另做一套本地登录 UI** |
 | **S3** | **无首启引导/无 onboarding 界面**：从打开到进入对话，不出现任何用户引导、安装向导、初始化配置页 | 登录后直达可输入对话框（R5）；缺能力时给的是「功能内提示 + 主动触发入口」，不是全屏引导流程 | 首次启动弹「欢迎使用」多步向导、强制先装环境才能继续、把环境探测做成进界面的必经步骤 |
 | **S4** | **依赖环境登录后按需探测/安装**：本机依赖环境（视频渲染 `video-runtime`、便携 Python、可选组件）的探测与安装，**发生在登录之后**，由用户在对应功能里**主动选择触发** | 未登录不探测、不下载；登录后用户点「检测环境/制作视频」等入口才触发探测；探测结果给出可操作的安装引导（如 `environment_install`），失败不阻塞其它功能 | 启动即后台下载 ~290MB 运行时/分片、首启强装 WebView2 之外的组件、缺环境时直接把用户挡在安装页、把下载器/进度面板作为启动第一屏 |
-| **S5** | **绿色版交付、免安装、双击即跑**：桌面客户端的默认交付物是**绿色版目录/压缩包**——一个文件夹内含 `Octop.exe` 与其同级的 `video-runtime/`，**双击 exe 直接运行**，不需要 NSIS/安装向导、不写 Program Files、不写注册表、不改系统 PATH | 解压/拷贝到任意目录（含 U 盘）后双击 `Octop.exe` 即可打开界面；搬移/删除整个目录不留系统残留；`video-runtime` 位于 exe 同级并被 `videoRuntimeInstallDir()` 原生识别 | 产出 NSIS 安装器（`*-setup.exe` / `Octop-desktop-windows-*.exe`）、要求「下一步下一步」安装、装到 Program Files、写注册表卸载项；绿色版里缺 `video-runtime` 导致视频不可用 |
-| **S6** | **完整功能构建进入**：绿色版必须把**素材管理（含素材库 AI 识别交互入口）**与**视频依赖环境的探测/下载/安装能力**完整构建进去，不得是「只有壳、点进去啥也没有」的空壳 | 构建时烘焙 `VIDEO_COMPONENTS_URL` = **manifest.json URL**（如 `https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json`，可逗号分隔多节点），使 `environment_install` 返回真实下载地址而非 `NO_INSTALLER`；绿色版内含/video 功能可就地补齐 `video-runtime`（node + chrome-headless-shell）；素材管理功能入口可用 | 构建留空 `VIDEO_COMPONENTS_URL` 导致「安装环境」报 `NO_INSTALLER`；把 `.exe` 安装包 URL 当 manifest 填进去；绿色版只给裸壳 exe、视频与素材能力缺失 |
+| **S5** | **绿色版交付、免安装、双击即跑**：桌面客户端的默认交付物是**绿色版目录/压缩包**——一个文件夹内含 `Octop.exe`（可另含轻量的同级 `video-runtime/` 骨架），**双击 exe 直接运行**，不需要 NSIS/安装向导、不写 Program Files、不写注册表、不改系统 PATH | 解压/拷贝到任意目录（含 U 盘）后双击 `Octop.exe` 即可打开界面；搬移/删除整个目录不留系统残留；`video-runtime`（若存在）位于 exe 同级并被 `videoRuntimeInstallDir()` 原生识别 | 产出 NSIS 安装器（`*-setup.exe` / `Octop-desktop-windows-*.exe`）、要求「下一步下一步」安装、装到 Program Files、写注册表卸载项；**把渲染引擎（Chromium + Remotion，约 550MB）打进绿色版**导致附件超限 |
+| **S6** | **双击即跑 = 界面可开、登录可用；不要求功能完整**：绿色版的「即跑」底线是**能显示界面、能正常登录、其余依赖按需联网下载**。渲染引擎等重依赖**默认剥离**，不随包分发 | 双击 exe 后数秒内出现登录页并完成微信开放平台登录；进入产品库、素材库、方案编辑等**服务端 UI 功能**均可正常使用；「视频环境」页显示「需要安装」，点「一键安装」从 manifest URL 拉取渲染引擎到 exe 同级 `video-runtime/` 后本机出片 | 把「双击即跑」误解为「全部功能离线可用」、为了「功能完整」把 550MB 渲染引擎塞进安装包导致超 Gitee 100MB 附件上限、或因渲染引擎缺失而让客户端启动即报错/挡住界面 |
 
 **S5/S6 的事实补充（防止把交付形态做偏）**：
 - **绿色版是目录，不是安装器**：`videoRuntimeInstallDir()` 优先级为 `OCTOP_DESKTOP_VIDEO_RUNTIME` > `<exe 同级>/video-runtime` > 用户缓存，exe 同级布局是代码原生支持的绿色形态。Taskfile 现有 `package*`/`create:nsis:installer` 三条路径**全部产出 NSIS 安装器**，不满足 S5，绿色版必须走独立的打包路径（裸壳 + 同级 `video-runtime` 目录 → 压缩包），不得复用 NSIS 安装器流程。
+- **★「双击即跑」不等于「功能完整」（2026-11-20 补入，防走偏）**：绿色版的底线是**能显示界面、能正常登录**；其余依赖（渲染引擎、可选组件）**按需联网下载**。渲染引擎（Remotion + Chromium + node_modules，约 **550 MB**）**默认剥离**，不随包分发。用户未装渲染引擎时，「视频环境」页显示「需要安装」，点「一键安装」即从 manifest URL 拉取——这是**正常状态**，不是缺陷，不得因此把 550MB 塞回安装包。
+- **★ 体积实测与 100MB 预算（Gitee 单附件硬上限）**：2026-11-20 在 windows-amd64 上实测——
+  **绿色版最终只含 `Octop.exe`（12.5 MB）+ `README.txt`**，**不带 `video-runtime/` 骨架**
+  （已发布的 `core.zip` 自带 node.exe + worker + Remotion 依赖树，`bootstrap.Run` 解到 exe 同级
+  `video-runtime/`，目录不存在会自动创建；再塞一份等于让用户白下载一遍）。
+  | 打包格式 | 体积 | 相对 100MB 上限余量 |
+  |---|---|---|
+  | zip（deflate `-mx=9`，Python zipfile） | **5.3 MB** | ≈ 95 MB |
+  | 7z（`-mx=9 -m0=lzma2`） | **4.1 MB** | ≈ 96 MB |
+  > zip 兼容性优先（Windows 内置解压即可），7z 体积优先；两者都在限额内，**优先 zip**。
+  > 备选方案（若将来要求离线自带运行时）：`node.exe` 原始 87.1 MB，7z `-mx=9` 压到 21.2 MB
+  > （4.3 倍），worker 脚本只用 Node 内置模块、零外部依赖（Remotion 是 `await import()` 动态加载，
+  > 仅实际渲染时需要）——但那样就违背 S6「重依赖不进包」，仅作备选。
+- **★ manifest URL 必须烘焙多节点（2026-11-20 实测）**：`dw.mengxa.com` 的 DNS 轮询到
+  `175.178.192.87` 时 **HTTPS 握手失败**（该节点只服务 HTTP），`8.134.147.195` **证书已过期**。
+  只烘焙单个 HTTPS URL 时，「一键安装」约 **1/3 概率取不到 manifest**。客户端的
+  `componentsDownloadClient` 会逐 IP 探测并自动避开坏节点，因此 URL 列表需含可达节点：
+  `https://dw.mengxa.com/.../manifest.json,http://dw.mengxa.com/.../manifest.json,http://175.178.192.87/.../manifest.json`。
 - **`VIDEO_COMPONENTS_URL` 必须是 manifest.json，不是安装包 exe**：`video_install.go:104-109` 把该值交给 `bootstrap.LoadManifest` 解析 `parts[]` 逐块下载；填 `.exe` URL 会解析失败。仓库 `docs/desktop-windows-build.md` 里给出的 `Octop-video-components-*.exe` 链接是旧格式，勿用。
 - **素材管理走服务端 UI**：素材库前端在 ocbot 服务端已部署，thin 壳登录后即可用（S2/S3），绿色版不另做一套本地素材 UI；但入口与交互链路必须在验收中确认可达。
+- **实机验证（2026-11-20）**：绿色版 zip 解压到干净目录 → 双击 `Octop.exe` → 进程 75.8 MB
+  （WebView2 已渲染界面）→ 导航日志显示 `https://ocbot.aixifs.com/videogen/chat/4BR3DC` 全部
+  API 200 → **界面可开、登录态有效、直接进入对话页**，满足 S5/S6 底线。
 
 **S2 的事实补充（防止把登录做偏）**：微信开放平台登录在主干**早已实现**，本次是「复用」不是「新造」。
 - 落点：后端 `wechat_open` adapter（`77b1e910`）+ 登录页单一 SSO 入口（`9e33133c`/`8b496018`）；昨天版本（`019c6e00`）与当前代码一致。
 - Octop 侧**只有一条入口**：登录按钮 → 开 SSO popup → 跳微信官方 `qrconnect` 授权页 → 微信带 `code` 回调 → 后端换 `openid` 签发 JWT。
 - 所谓「扫码登录 / 直接登录」两种状态，是**微信官方授权页**按当前设备的微信登录态自行呈现的（本机微信已登录可快捷授权，否则手机微信扫码）。**Octop 不自绘二维码、不做两套登录 UI、不判断用户用哪种方式**——只消费回调 `code`。详见 [微信开放平台登录](./wechat-open-login.md)。
 
-六条约束的优先级：**S1 > S2 > S3 > S4，且 S5、S6 为交付形态与功能完整性的强制基线**；
+六条约束的优先级：**S1 > S2 > S3 > S4，且 S5、S6 为交付形态与「即跑底线」的强制基线**；
 相互冲突时以上位约束为准。即「先能打开界面 → 再固定走指定后端登录 → 全程无引导 →
-环境按需、登录后、用户主动 → 以绿色版免安装交付 → 素材与视频能力完整构建进入」。
+环境按需、登录后、用户主动 → 以绿色版免安装交付 → 双击即跑只需界面可开+登录可用，
+重依赖（渲染引擎）剥离出包、登录后按需下载」。
 
 **与 §5 形态的关系**：满足 S1–S6 的默认分发形态是 **thin 内核的绿色版**——UI 走 ocbot 服务端
 （满足 S1/S2/S3），壳以「exe + 同级 video-runtime」目录/压缩包交付（满足 S5），
@@ -195,8 +217,8 @@ Octop 以多种形态交付，选择逻辑与渠道详见 [交付矩阵](./RELEA
 | 形态 | 产物 | 面向 | 特点 |
 |---|---|---|---|
 | **服务端 / Web** | Python wheel + 内置 dashboard SPA | 自托管部署者 | `pip install` 单进程启动 |
-| **桌面绿色版（thin 内核）** | **绿色目录/压缩包**：`Octop.exe` + 同级 `video-runtime/` | **默认/唯一主推分发形态** | 双击即跑、免安装、不写系统；UI 走 `https://ocbot.aixifs.com/videogen`，烘焙 manifest URL 使素材/视频能力完整；满足 §4.1 S1–S6 |
-| **桌面 full / slim** | 内嵌/首启下载运行时的绿色目录 | 离线 / 内网备选（非默认） | 完整运行时本地化；若解压/下载阻塞开界面则违反 S1/S3/S4；同样免安装（S5）、能力完整（S6） |
+| **桌面绿色版（thin 内核）** | **绿色目录/压缩包**：`Octop.exe`（+ 可选的轻量 `video-runtime/` 骨架） | **默认/唯一主推分发形态** | 双击即跑、免安装、不写系统；UI 走 `https://ocbot.aixifs.com/videogen`；渲染引擎剥离出包、登录后按需下载；满足 §4.1 S1–S6 |
+| **桌面 full / slim** | 内嵌/首启下载运行时的绿色目录 | 离线 / 内网备选（非默认） | 完整运行时本地化；若解压/下载阻塞开界面则违反 S1/S3/S4；同样免安装（S5） |
 | **CLI / API / ACP** | 命令行与接口 | 开发者 | 随 wheel 提供 |
 
 > **不再提供 NSIS 安装器**：`package*` / `create:nsis:installer` 产出的 `*-setup.exe` 不满足 S5，
@@ -205,8 +227,9 @@ Octop 以多种形态交付，选择逻辑与渠道详见 [交付矩阵](./RELEA
 > 关键产品决策（2026-11-20 修正，以 §4.1 红线为准）：
 > **默认/唯一主推分发形态是「thin 内核的绿色版」**——固定连 `https://ocbot.aixifs.com/videogen`，
 > 登录走该后端已实现的微信开放平台 SSO，界面立即打开、无引导、依赖按需；
-> 以「exe + 同级 video-runtime」目录/压缩包交付，双击即跑、免安装；
-> 构建时烘焙 `VIDEO_COMPONENTS_URL`（manifest.json URL）保证素材与视频环境能力完整。
+> 以「`Octop.exe` +（可选）同级 `video-runtime/`」目录/压缩包交付，双击即跑、免安装；
+> **构建时烘焙 `VIDEO_COMPONENTS_URL`（manifest.json URL，多节点逗号分隔）**，
+> 使登录后的「一键安装」能从 CDN 拉取渲染引擎——**重依赖不进包、不阻断启动**。
 > slim/full 仅作离线/内网备选，**不得作为默认启动路径**，且一律以绿色版交付。
 > 运行时分片与视频组件走多节点 CDN，任意两节点失效自动切换可用源。
 
