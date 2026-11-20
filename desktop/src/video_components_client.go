@@ -206,7 +206,13 @@ func containsString(values []string, want string) bool {
 // componentsDownloadClient returns the client used for both the manifest and
 // the part downloads. When a hostname has multiple addresses, its transport
 // dials the probed addresses in order instead of letting DNS pick blindly.
-func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *http.Client {
+//
+// partURLs are the locations of the archives themselves. They are probed
+// alongside the manifest URLs because the archives may live on another host
+// than the manifest — a node that only serves the manifest is useless for
+// the download, and a node that serves the archives must be pinned even when
+// the manifest is fetched elsewhere.
+func componentsDownloadClient(manifestURLs []string, log func(string, ...any), partURLs ...string) *http.Client {
 	client := bootstrap.DefaultClient()
 	base, ok := client.Transport.(*http.Transport)
 	if !ok {
@@ -215,7 +221,9 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *
 	if log == nil {
 		log = func(string, ...any) {}
 	}
-	samples := componentHostSamples(manifestURLs)
+	// Everything that will be fetched goes into the probe set.
+	allURLs := append(append([]string{}, manifestURLs...), partURLs...)
+	samples := componentHostSamples(allURLs)
 	if len(samples) == 0 {
 		return client
 	}
@@ -227,7 +235,7 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any)) *
 	// while its TLS setup is broken (a missing or expired certificate for
 	// the domain). Probing only the HTTPS variant would write off one of
 	// the fastest nodes, so every (host, scheme) pair gets its own probe.
-	schemeSamples := componentSchemeSamples(manifestURLs)
+	schemeSamples := componentSchemeSamples(allURLs)
 
 	pinned := make(map[string][]string, len(samples))
 	// healthyOrder holds the nodes that answered a probe, per host and
