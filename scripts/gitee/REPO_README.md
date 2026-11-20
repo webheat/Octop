@@ -29,7 +29,6 @@ Octop 是一个开源自托管的 AI 助手平台：多用户、多智能体，�
 > 但没有随附的使用说明。
 
 全部发行版本见 [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases)。
-远程版打开后直连 <https://ocbot.aixifs.com/videogen>。
 
 ## 2. 视频渲染环境（需要出片时才装）
 

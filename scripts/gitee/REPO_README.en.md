@@ -37,7 +37,6 @@ The folder holds two files after unzipping: `Octop.exe` (the program) and
 > is available on its own — without the bundled instructions.
 
 Every release is listed under [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases).
-The client talks to <https://ocbot.aixifs.com/videogen> directly.
 
 ## 2. Video rendering environment (install it only when you need to export)
 
