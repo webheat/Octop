@@ -274,6 +274,108 @@ class ProductLibraryRepo:
                 (asset_id, owner_id, error, model, ts, ts),
             )
 
+    # -- curated base library ------------------------------------------------
+    # Rows are the SQLite index of the high-quality base image library. Files
+    # live under product-library/<uid>/base-library/ (ready) or
+    # product-library/<uid>/quarantine/<reason>/ (isolated), never in the DB.
+
+    def add_base_image(
+        self, owner_id: int, *, image_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        ts = now_ts()
+        with self._db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO product_library_base_images(
+                    image_id, owner_user_id, filename, media_type, byte_size,
+                    content_hash, phash, dhash, width, height, blur_score,
+                    brightness, flatness, quality_score, dominant_colors,
+                    storage_path, status, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    image_id,
+                    owner_id,
+                    fields["filename"],
+                    fields["media_type"],
+                    fields["byte_size"],
+                    fields["content_hash"],
+                    fields.get("phash", ""),
+                    fields.get("dhash", ""),
+                    fields.get("width", 0),
+                    fields.get("height", 0),
+                    fields.get("blur_score", 0.0),
+                    fields.get("brightness", 0.0),
+                    fields.get("flatness", 0.0),
+                    fields.get("quality_score", 0.0),
+                    json.dumps(fields.get("dominant_colors", []), ensure_ascii=False),
+                    fields["storage_path"],
+                    fields.get("status", "ready"),
+                    fields.get("reason", ""),
+                    ts,
+                    ts,
+                ),
+            )
+        return self.get_base_image(owner_id, image_id) or {}
+
+    def get_base_image(self, owner_id: int, image_id: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM product_library_base_images "
+                "WHERE owner_user_id = ? AND image_id = ?",
+                (owner_id, image_id),
+            ).fetchone()
+        return self._base_row(row)
+
+    def list_base_images(self, owner_id: int, *, status: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM product_library_base_images WHERE owner_user_id = ?"
+        params: list[Any] = [owner_id]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC"
+        with self._db.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._base_row(row) or {} for row in rows]
+
+    def list_ready_hashes(self, owner_id: int) -> list[dict[str, Any]]:
+        """Perceptual hashes of ready images, used for local near-duplicate checks."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT image_id, content_hash, phash, dhash FROM product_library_base_images "
+                "WHERE owner_user_id = ? AND status = 'ready'",
+                (owner_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_base_image(
+        self, owner_id: int, image_id: str, *, status: str, reason: str = "", storage_path: str = ""
+    ) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute(
+                "UPDATE product_library_base_images SET status = ?, reason = ?, "
+                "storage_path = CASE WHEN ? = '' THEN storage_path ELSE ? END, "
+                "updated_at = ? WHERE owner_user_id = ? AND image_id = ?",
+                (status, reason, storage_path, storage_path, now_ts(), owner_id, image_id),
+            )
+        return bool(cur.rowcount > 0)
+
+    def delete_base_image(self, owner_id: int, image_id: str) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute(
+                "DELETE FROM product_library_base_images WHERE owner_user_id = ? AND image_id = ?",
+                (owner_id, image_id),
+            )
+        return bool(cur.rowcount > 0)
+
+    @staticmethod
+    def _base_row(row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        result = dict(row)
+        result["dominant_colors"] = json.loads(result.get("dominant_colors") or "[]")
+        return result
+
     def create_project(
         self, owner_id: int, product_id: str, name: str, snapshot: dict[str, Any]
     ) -> dict[str, Any]:
