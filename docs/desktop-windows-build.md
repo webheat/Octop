@@ -144,15 +144,19 @@ wails3 task windows:components:installer VERSION=1.4.0 \
 需要从零重建 runtime 时才用 `windows:components:package`（它会跑
 `remotion/build-desktop-runtime.mjs`，要联网拉 Node 与 headless shell，慢很多）。
 
-打客户端时把组件下载地址编译进去，界面才会出现「下载视频组件」按钮：
+打客户端时把组件 **manifest.json** 地址编译进去，界面才会出现「下载视频环境」按钮并执行安装：
 
 ```bash
 wails3 task package ARCH=amd64 VERSION=1.4.0 \
-  VIDEO_COMPONENTS_URL="https://gitee.com/webheat/octop_client/releases/download/v1.4.0-gitee.1/Octop-video-components-windows-x64-1.4.0.exe"
+  VIDEO_COMPONENTS_URL="https://dw.mengxa.com/video-components/1.4.0/win-x64/manifest.json"
 ```
 
-> 这个地址**只能是单个 URL**（不像运行时可给逗号列表），取不到时界面退化成
-> 「联系管理员获取安装包」。72 MB 压得进 Gitee 附件，所以首选 Gitee 直连。
+> ⚠️ **2026-11-20 修正（曾导致「构建进去却报 NO_INSTALLER」）**：这里必须是
+> `bootstrap.LoadManifest` 能解析的 **manifest.json URL**，不是 NSIS 安装包 `.exe` 链接。
+> 旧文档里的 `Octop-video-components-*.exe` 直链是早期单文件安装器格式，代码已改为
+> `manifest.json` + `parts[]` 分片下载（带断点续传与 SHA256），填 `.exe` 会解析失败。
+> manifest URL **支持逗号分隔多节点**（主 + 镜像容灾），取不到时 `environment_install`
+> 返回 `NO_INSTALLER`。线上可用地址见 `scripts/release-video-components.sh` 输出。
 
 > 也可以用仓库自带的发布脚本（它会串起前端 → portable → 校验 → 打包）：
 > `bash desktop/package-release.sh windows-amd64`。
