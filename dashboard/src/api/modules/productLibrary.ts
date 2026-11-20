@@ -42,12 +42,32 @@ export interface ProductAsset
 }
 
 /** One image in a directory-import analysis result. */
+/**
+ * One file queued for import, paired with its relative path.
+ *
+ * Declared here rather than in the page so the API module never imports from
+ * `pages/`; the page builds these and hands them straight to `analyzeImport`.
+ */
+export interface ImportEntry {
+  file: File;
+  /** Normalised with `/`, e.g. `hiking-bag/front/01.jpg`. */
+  path: string;
+  /** Stable de-dupe key so the same file dropped twice is queued once. */
+  key: string;
+}
+
 export interface ImportItem {
   index: number;
   filename: string;
+  /** Client-supplied relative path, e.g. `hiking-bag/front/01.jpg`. */
+  relative_path: string;
+  /** Top-level folder name, used as a grouping prior. */
+  folder: string;
   confidence: number;
   description: string;
   tags: string[];
+  /** Whether the group came from the vision model or the folder name. */
+  group_source: "vision" | "folder";
   duplicate: boolean;
 }
 
@@ -61,6 +81,7 @@ export interface ImportGroup {
 
 export interface ImportNotice {
   filename: string;
+  relative_path?: string;
   reason: string;
 }
 
@@ -201,9 +222,15 @@ export const productLibraryApi = {
       body,
     );
   },
-  analyzeImport: (files: File[]) => {
+  analyzeImport: (entries: ImportEntry[]) => {
     const body = new FormData();
-    files.forEach((file) => body.append("files", file));
+    entries.forEach((entry) => {
+      // Keep the original field name so an older backend still accepts it.
+      body.append("files", entry.file);
+      // Parallel field, aligned by index: multipart parsers basename the
+      // Content-Disposition filename, which would flatten the structure.
+      body.append("paths", entry.path);
+    });
     return requestUpload<ImportAnalysis>(
       "/product-library/imports/analyze",
       body,

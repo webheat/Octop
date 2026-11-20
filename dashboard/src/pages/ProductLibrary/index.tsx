@@ -20,6 +20,7 @@ import {
   FilePlus2,
   FileVideo,
   FolderOpen,
+  ImagePlus,
   Package,
   Plus,
   Sparkles,
@@ -45,6 +46,18 @@ import { message } from "../../utils/antdMessage";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useDesktopMinimalMode } from "../../hooks/useDesktopMinimalMode";
 import { isPaidTierUser } from "../../utils/permissions";
+import {
+  MAX_IMPORT_FILES,
+  entriesFromDataTransfer,
+  entriesFromFileList,
+  mergeEntries,
+} from "./importFiles";
+import type { ImportEntry } from "./importFiles";
+
+/** Raster formats the import wizard can categorise; matches the backend list. */
+const IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.bmp,.avif";
+/** How many relative paths to show in the queue preview before folding. */
+const IMPORT_PREVIEW_PATHS = 5;
 
 const blank: Omit<Product, "id"> = {
   name: "",
@@ -76,6 +89,20 @@ function classifyUsage(file: File): ProductAsset["usage"] {
 
 function isVideoMedia(mediaType: string) {
   return mediaType.startsWith("image/") || mediaType.startsWith("video/");
+}
+
+/** Top-level folders of the queue, so the user can confirm structure survived. */
+function importPreview(entries: ImportEntry[]): string {
+  const folders = new Set<string>();
+  entries.forEach((entry) => {
+    const [head, ...rest] = entry.path.split("/");
+    if (head && rest.length) folders.add(head);
+  });
+  const names = [...folders].slice(0, IMPORT_PREVIEW_PATHS);
+  if (!names.length) return entries[0]?.path ?? "";
+  return folders.size > names.length
+    ? `${names.join("、")} …`
+    : names.join("、");
 }
 
 export default function ProductLibraryPage() {
@@ -140,7 +167,10 @@ export default function ProductLibraryPage() {
   // Directory import wizard state.
   const [importOpen, setImportOpen] = useState(false);
   const [importStep, setImportStep] = useState<0 | 1 | 2>(0);
-  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importEntries, setImportEntries] = useState<ImportEntry[]>([]);
+  const [importDragActive, setImportDragActive] = useState(false);
+  const importImageInputRef = useRef<HTMLInputElement | null>(null);
+  const importFolderInputRef = useRef<HTMLInputElement | null>(null);
   const [importJobId, setImportJobId] = useState("");
   const [importGroups, setImportGroups] = useState<ImportGroup[]>([]);
   const [importExcluded, setImportExcluded] = useState<number[]>([]);
@@ -554,7 +584,8 @@ export default function ProductLibraryPage() {
   // ---- Directory import wizard ----
   const openImport = () => {
     setImportStep(0);
-    setImportFiles([]);
+    setImportEntries([]);
+    setImportDragActive(false);
     setImportJobId("");
     setImportGroups([]);
     setImportExcluded([]);
@@ -562,11 +593,43 @@ export default function ProductLibraryPage() {
     setImportFailed([]);
     setImportOpen(true);
   };
+  const appendImportFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+    const incoming = entriesFromFileList(files);
+    if (!incoming.length) return;
+    setImportEntries((all) => {
+      const merged = mergeEntries(all, incoming);
+      if (merged.length === all.length) return all;
+      if (
+        merged.length >= MAX_IMPORT_FILES &&
+        merged.length < all.length + incoming.length
+      )
+        message.warning(
+          t("productLibrary.importTruncated", { max: MAX_IMPORT_FILES }),
+        );
+      return merged;
+    });
+  };
+  const handleImportDrop = async (
+    event: React.DragEvent<HTMLDivElement>,
+  ): Promise<void> => {
+    event.preventDefault();
+    setImportDragActive(false);
+    // Snapshot the DataTransfer synchronously: items are invalidated once the
+    // event handler returns.
+    const dataTransfer = event.dataTransfer;
+    const { entries, truncated } = await entriesFromDataTransfer(dataTransfer);
+    if (entries.length) setImportEntries((all) => mergeEntries(all, entries));
+    if (truncated)
+      message.warning(
+        t("productLibrary.importTruncated", { max: MAX_IMPORT_FILES }),
+      );
+  };
   const analyseImport = async () => {
-    if (!importFiles.length) return;
+    if (!importEntries.length) return;
     setImportBusy(true);
     try {
-      const result = await productLibraryApi.analyzeImport(importFiles);
+      const result = await productLibraryApi.analyzeImport(importEntries);
       setImportJobId(result.job_id);
       setImportGroups(result.groups);
       setImportSkipped(result.skipped);
@@ -1699,11 +1762,11 @@ export default function ProductLibraryPage() {
               <Button
                 type="primary"
                 loading={importBusy}
-                disabled={!importFiles.length}
+                disabled={!importEntries.length}
                 onClick={() => void analyseImport()}
               >
                 {t("productLibrary.importAnalyze", {
-                  count: importFiles.length,
+                  count: importEntries.length,
                 })}
               </Button>
             )}
@@ -1724,22 +1787,78 @@ export default function ProductLibraryPage() {
             <Typography.Text type="secondary">
               {t("productLibrary.importSelectHint")}
             </Typography.Text>
-            <input
-              type="file"
-              // @ts-expect-error webkitdirectory is a valid browser attribute.
-              webkitdirectory=""
-              directory=""
-              multiple
-              onChange={(event) =>
-                setImportFiles(Array.from(event.target.files ?? []))
-              }
-            />
-            {importFiles.length > 0 && (
-              <Typography.Text>
-                {t("productLibrary.importSelected", {
-                  count: importFiles.length,
-                })}
+            <Space wrap>
+              <input
+                ref={importImageInputRef}
+                type="file"
+                accept={IMAGE_ACCEPT}
+                multiple
+                hidden
+                onChange={(event) => {
+                  appendImportFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <Button
+                icon={<ImagePlus size={16} />}
+                onClick={() => importImageInputRef.current?.click()}
+              >
+                {t("productLibrary.importPickImages")}
+              </Button>
+              <input
+                ref={importFolderInputRef}
+                type="file"
+                // @ts-expect-error webkitdirectory is a valid browser attribute.
+                webkitdirectory=""
+                directory=""
+                multiple
+                hidden
+                onChange={(event) => {
+                  appendImportFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <Button
+                icon={<FolderOpen size={16} />}
+                onClick={() => importFolderInputRef.current?.click()}
+              >
+                {t("productLibrary.importPickFolder")}
+              </Button>
+            </Space>
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setImportDragActive(true);
+              }}
+              onDragLeave={() => setImportDragActive(false)}
+              onDrop={(event) => void handleImportDrop(event)}
+              style={{
+                border: `1px dashed ${
+                  importDragActive ? "#1677ff" : "rgba(0,0,0,0.18)"
+                }`,
+                borderRadius: 8,
+                padding: "24px 12px",
+                textAlign: "center",
+                color: "rgba(0,0,0,0.45)",
+              }}
+            >
+              <Typography.Text type="secondary">
+                {t("productLibrary.importDropHint")}
               </Typography.Text>
+            </div>
+            {importEntries.length > 0 && (
+              <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                <Typography.Text>
+                  {t("productLibrary.importQueueSummary", {
+                    count: importEntries.length,
+                  })}
+                </Typography.Text>
+                <Typography.Text type="secondary" ellipsis>
+                  {t("productLibrary.importQueuePaths", {
+                    paths: importPreview(importEntries),
+                  })}
+                </Typography.Text>
+              </Space>
             )}
             <Typography.Text type="warning">
               {t("productLibrary.importCostHint")}

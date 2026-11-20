@@ -148,9 +148,16 @@ class DescribeMissingResponse(BaseModel):
 class ImportItem(BaseModel):
     index: int
     filename: str
+    relative_path: str = Field(
+        default="", description="Client-supplied path, e.g. `hiking-bag/front/01.jpg`."
+    )
+    folder: str = Field(default="", description="Top-level folder used as a grouping prior.")
     confidence: float = 0.0
     description: str = ""
     tags: list[str] = []
+    group_source: Literal["vision", "folder"] = Field(
+        default="vision", description="Whether the group came from the model or the folder name."
+    )
     duplicate: bool = False
 
 
@@ -163,6 +170,7 @@ class ImportGroup(BaseModel):
 
 class ImportNotice(BaseModel):
     filename: str
+    relative_path: str = ""
     reason: str
 
 
@@ -396,14 +404,18 @@ async def upload_assets(
     response_model=ImportAnalysisResponse,
     summary="Categorise a directory of images into suggested product groups (dry run)",
     description=(
-        "Accepts the files picked by the browser's directory selector, runs one "
-        "vision call per distinct image and returns a reviewable grouping plan. "
-        "Writes no products or assets; the files are kept in a temporary job "
-        "directory until commit."
+        "Accepts the files picked by the browser's file or directory selector, "
+        "runs one vision call per distinct image and returns a reviewable "
+        "grouping plan. `paths` is an optional parallel field carrying each "
+        "file's relative path so directory structure survives the upload; when "
+        "absent or shorter than `files`, the entries fall back to the bare "
+        "filename. Writes no products or assets; the files are kept in a "
+        "temporary job directory until commit."
     ),
 )
 async def analyse_import(
     files: list[UploadFile] = File(...),
+    paths: list[str] = Form(default=[]),
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
@@ -412,10 +424,13 @@ async def analyse_import(
         server.services.config.max_upload_bytes or upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
     )
     payload: list[tuple[str, str, bytes]] = []
-    for file in files:
+    for index, file in enumerate(files):
         filename = Path(file.filename or "upload.bin").name
+        # Parallel field, not the multipart filename: parsers basename the
+        # Content-Disposition name, which would silently drop the structure.
+        raw_path = paths[index].strip() if index < len(paths) else ""
         data = await read_upload_capped(file, max_bytes=max_bytes)
-        payload.append((filename, file.content_type or "", data))
+        payload.append((raw_path or filename, file.content_type or "", data))
     return await analyse_upload(
         service,
         server.services.provider_repo,
