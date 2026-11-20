@@ -61,13 +61,6 @@ the program.
 - After the video environment is installed the folder gains a `video-runtime/`
   subdirectory (about 500 MB).
 
-## Need your own server?
-
-This page carries the remote client only. A self-contained installer that
-bundles the Python runtime starts at 200 MB, above Gitee's 100 MB attachment
-limit, so it is not distributed here. For offline or private deployments,
-follow the deployment guide in the source repository.
-
 ## Documentation
 
 - Guides: <https://github.com/TencentCloud/Octop/tree/main/docs>
