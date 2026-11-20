@@ -351,20 +351,38 @@ func (f *fetcher) downloadParallel(url string, part Part, dest string, connectio
 		c := chunks[i]
 		// Round-robin the mirrors: range 0 takes the primary, range 1 the
 		// first mirror, and so on.
-		mirror := url
-		if len(part.URLs) > 0 {
-			mirror = part.URLs[c.index%len(part.URLs)]
+		mirrors := part.URLs
+		if len(mirrors) == 0 {
+			mirrors = []string{url}
 		}
+		start := c.index % len(mirrors)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := f.downloadRange(mirror, part, c, tracker); err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
+			// Every range falls back to the other mirrors: one dead node
+			// must not cost the whole part. The mirrors of one host are
+			// often separate machines, so the fallback also spreads the
+			// load differently.
+			var lastErr error
+			for attempt := 0; attempt < len(mirrors); attempt++ {
+				mirror := mirrors[(start+attempt)%len(mirrors)]
+				err := f.downloadRange(mirror, part, c, tracker)
+				if err == nil {
+					return
 				}
-				errMu.Unlock()
+				lastErr = err
+				if errors.Is(err, errNoRangeSupport) {
+					// The mirror cannot serve byte ranges at all — trying
+					// the next one is pointless.
+					break
+				}
+				f.log("bootstrap: %s failed for range %d: %v", mirror, c.index, err)
 			}
+			errMu.Lock()
+			if firstErr == nil {
+				firstErr = lastErr
+			}
+			errMu.Unlock()
 		}()
 	}
 	wg.Wait()

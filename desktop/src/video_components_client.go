@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"octop.desktop/bootstrap"
@@ -317,7 +316,20 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any), p
 	// — round-robin spreads those connections over the independent nodes
 	// instead of piling them onto one origin and hitting that machine's
 	// bandwidth ceiling.
-	var counter uint64
+	//
+	// The counter is per host and port: the HTTPS pool and the plain-HTTP
+	// pool are different sets of nodes, and a shared counter would let the
+	// two schemes steal each other's slots — the fastest node could end up
+	// unused while the slow ones take every connection.
+	var counterMu sync.Mutex
+	counters := map[string]uint64{}
+	nextSlot := func(key string, size int) int {
+		counterMu.Lock()
+		defer counterMu.Unlock()
+		value := counters[key]
+		counters[key] = value + 1
+		return int(value % uint64(size))
+	}
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		addrHost, port, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -342,7 +354,7 @@ func componentsDownloadClient(manifestURLs []string, log func(string, ...any), p
 		}
 		// Start at a different node for every connection so parallel range
 		// requests land on separate machines.
-		start := int(atomic.AddUint64(&counter, 1)-1) % len(preferred)
+		start := nextSlot(host+"|"+port, len(preferred))
 		candidates := make([]string, 0, len(preferred))
 		for i := 0; i < len(preferred); i++ {
 			candidates = append(candidates, preferred[(start+i)%len(preferred)])

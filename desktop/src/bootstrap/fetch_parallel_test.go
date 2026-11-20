@@ -289,6 +289,49 @@ func serverClientFor(servers ...*httptest.Server) *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
 }
 
+// TestParallelDownloadFallsBackToAnotherMirror checks that a dead mirror
+// does not cost the whole part: the ranges that failed there are fetched
+// from the next mirror.
+func TestParallelDownloadFallsBackToAnotherMirror(t *testing.T) {
+	data := payload(5 * 1024 * 1024)
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveRangeBytes(data, w, r)
+	}))
+	defer live.Close()
+	// A mirror that answers with an error for every range request.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer dead.Close()
+
+	dest := filepath.Join(t.TempDir(), "runtime.zip")
+	f := &fetcher{
+		opts: Options{
+			Client:   &http.Client{Timeout: 30 * time.Second},
+			Attempts: 2,
+			Backoff:  []time.Duration{0},
+			MaxBytes: DefaultMaxBytes,
+			Log:      func(format string, args ...any) { t.Logf(format, args...) },
+		},
+		log: func(format string, args ...any) { t.Logf(format, args...) },
+	}
+	part := Part{
+		ID:   "runtime",
+		URLs: []string{dead.URL + "/runtime.zip", live.URL + "/runtime.zip"},
+		Size: int64(len(data)), Connections: 4,
+	}
+	if err := f.fetch(part, dest, checksum(data)); err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("the reassembled archive differs: got %d bytes, want %d", len(got), len(data))
+	}
+}
+
 // TestPlanChunksCoversTheWholeFile checks the range arithmetic.
 func TestPlanChunksCoversTheWholeFile(t *testing.T) {
 	for _, size := range []int64{1, 1024, 1 << 20, 5_000_000, 100_000_000} {
