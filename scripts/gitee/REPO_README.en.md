@@ -9,15 +9,16 @@ This repository distributes the **Octop desktop client** builds.
 > [CNB](https://cnb.cool/mengxa.com/Octop) — this repository holds the
 > download page and the release artifacts only.
 
-## Two steps and you are done
+## Unzip and run
 
-1. **Install the client** (Windows, ~6 MB)
-2. **Install the video components** (~71 MB) — video renders locally, without
-   these you cannot export a video
+The **green build** needs no installation: unzip it into any writable folder
+and double-click `Octop.exe`. No installer wizard, nothing written to
+Program Files, no registry entries, no system PATH changes.
 
 The client connects to the Octop server we already deployed: sign-in, product
-library, AI storyboards and plan approval all live on the server; the client
-only renders the UI and the video, and **no Python runtime is needed locally**.
+library, material library, AI storyboards and plan approval all live on the
+server; the client only renders the UI and the video, and **no Python runtime
+is needed locally**.
 
 These builds are not code-signed, so Windows SmartScreen may warn about an
 unknown publisher — choose **More info → Run anyway**. This round ships the
@@ -27,40 +28,37 @@ Windows build only; macOS and Linux are not published yet.
 
 | System | Download | Size |
 |---|---|---|
-| Windows 10/11 x64 | [Octop-desktop-windows-amd64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-amd64-{{VERSION}}.exe) | ~6 MB |
-| Windows on ARM (Snapdragon X and similar) | [Octop-desktop-windows-arm64-{{VERSION}}.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-desktop-windows-arm64-{{VERSION}}.exe) | ~5.5 MB |
+| Windows 10/11 x64 | [Octop-green-windows-amd64-{{VERSION}}.zip]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-green-windows-amd64-{{VERSION}}.zip) | 5.3 MB |
+
+The folder holds two files after unzipping: `Octop.exe` (the program) and
+`README.txt`.
+
+> If you only need the program, [Octop.exe]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop.exe) (12.5 MB)
+> is available on its own — without the bundled instructions.
 
 Every release is listed under [Releases]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases).
-The client talks to <https://ocbot.aixifs.com/videogen> directly.
 
-## 2. Video components (required)
+## 2. Video rendering environment (install it only when you need to export)
 
-The desktop client does **not** bundle the video rendering environment (Node +
-Remotion + browser, ~500 MB unpacked). It is installed once, separately. Not
-installing it does not affect sign-in, the product library or storyboard
-editing — only local video production.
+This build does **not** bundle the local rendering engine (Node + Remotion +
+Chromium, ~228 MB). When you want to export a video, open the **Video
+environment** page in the client and click **Install in one click** — it is
+downloaded from the server and unpacked into a `video-runtime/` folder next to
+the program.
 
-| Component | Size | Download |
-|---|---|---|
-| **Video components (Windows x64)** | ~71 MB | [Download]({{GITEE_WEB}}/{{OWNER}}/{{REPO}}/releases/download/{{TAG}}/Octop-video-components-windows-x64-{{VERSION}}.exe) |
+- Until then that page shows "installation required"; **every other feature
+  works as usual**.
+- The first install downloads about 228 MB, depending on your connection.
+- Afterwards click **Re-check**; once it shows "local production ready" you
+  can produce real videos.
 
-Install steps:
+## Requirements
 
-1. Run the component installer with the defaults (installs to
-   `%LOCALAPPDATA%\Octop\video-runtime`, per-user, no admin rights, no PATH changes).
-2. Go back to **Produce product video** in the client and click **Re-check**.
-3. The client renders a few seconds of test video; once it shows
-   "local production ready", you can produce real videos.
-
-The client shows the same download button; you only see "contact your
-administrator" when the URL is unavailable.
-
-## Need your own server?
-
-This page carries the remote client only. A self-contained installer that
-bundles the Python runtime starts at 200 MB, above Gitee's 100 MB attachment
-limit, so it is not distributed here. For offline or private deployments,
-follow the deployment guide in the source repository.
+- Microsoft Edge WebView2 Runtime (shipped with Windows 11 and most Windows 10).
+- Unzip the client into a **writable folder** (not `C:\Program Files`): the
+  video environment is installed next to the program.
+- After the video environment is installed the folder gains a `video-runtime/`
+  subdirectory (about 500 MB).
 
 ## Documentation
 

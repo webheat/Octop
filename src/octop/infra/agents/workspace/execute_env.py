@@ -77,6 +77,13 @@ def agent_execute_env_defaults(
     auth_dir.mkdir(parents=True, exist_ok=True)
     skills_dir = host_system_dir(workspace_dir, cfg) / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
+    # The harness reads the legacy workspace-root ``skills/`` next to the
+    # canonical ``.octop/skills`` tree. When the agent has a system_files_path
+    # the legacy root is never created, and the skills middleware then logs
+    # "path_not_found" for it on every start. Create it so the root exists.
+    legacy_skills_dir = workspace_dir / "skills"
+    if legacy_skills_dir != skills_dir:
+        legacy_skills_dir.mkdir(parents=True, exist_ok=True)
     auth_env, skills_env = _agent_facing_auth_and_skills(
         workspace_dir=workspace_dir,
         cfg=cfg,

@@ -57,7 +57,7 @@ README_TEMPLATE = """Octop 桌面客户端 — 绿色版 {version}（Windows amd
 
 本版包含什么
 ------------
-  * 界面与后端来自 {server_url}，需网络连接。
+  * 界面与后端由客户端自行连接已部署好的服务，无需手动配置，需网络连接。
   * 登录、产品库、素材库、方案编辑等功能登录后即可直接使用。
   * 本机视频渲染所需的渲染引擎（Node + Remotion + Chromium，约 228 MB）
     **未随包附带**。在界面「视频环境」页点「一键安装」即从服务端下载，
@@ -112,11 +112,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", default="desktop/src/bin")
     parser.add_argument("--version", required=True)
     parser.add_argument(
-        "--server-url",
-        default="https://ocbot.aixifs.com/videogen",
-        help="the remote dashboard URL baked into the shell (README text only)",
-    )
-    parser.add_argument(
         "--no-7z", action="store_true", help="skip the 7z variant (zip is always built)"
     )
     args = parser.parse_args(argv)
@@ -127,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"missing exe: {exe_path}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    readme = README_TEMPLATE.format(version=args.version, server_url=args.server_url)
+    readme = README_TEMPLATE.format(version=args.version)
 
     with tempfile.TemporaryDirectory(prefix="octop-green-") as tmp:
         stage = pathlib.Path(tmp)

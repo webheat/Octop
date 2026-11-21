@@ -88,11 +88,38 @@ async def test_admin_can_update_another_users_agent(env) -> None:
     assert renamed.json()["user_id"] == owner_id
 
 
-async def test_non_admin_cannot_use_scope_all(env) -> None:
+async def test_non_admin_scope_all_degrades_to_mine(env) -> None:
+    """scope=all without the 'users' permission degrades to mine, not 403.
+
+    Legacy dashboards requested scope=all to fill an agent dropdown. Rather
+    than rejecting them, the backend returns the caller's own (+ shared)
+    agents — the dropdown works, and no other user's agent is exposed.
+    """
     c, _srv, admin_auth = env
     user_auth = await create_user(c, admin_auth, username="scope_user")
+    peer_auth = await create_user(c, admin_auth, username="scope_peer")
+
+    own = await c.post(
+        "/api/agents/from-expert/default",
+        headers=user_auth,
+        json={"name": "scope-own-bot"},
+    )
+    assert own.status_code == 201, own.text
+    own_agent_id = own.json()["agent_id"]
+
+    peer = await c.post(
+        "/api/agents/from-expert/default",
+        headers=peer_auth,
+        json={"name": "scope-peer-bot"},
+    )
+    assert peer.status_code == 201, peer.text
+    peer_agent_id = peer.json()["agent_id"]
+
     r = await c.get("/api/agents?scope=all", headers=user_auth)
-    assert r.status_code == 403
+    assert r.status_code == 200
+    ids = {row["agent_id"] for row in r.json()}
+    assert own_agent_id in ids
+    assert peer_agent_id not in ids
 
 
 async def test_non_admin_cannot_get_other_users_agent(env) -> None:

@@ -396,6 +396,12 @@ Boundary rules are in [§5](#5-module-boundaries). Additionally:
 - Do not write bare `pytest` — always `uv run pytest`.
 - Do not edit `src/octop/dashboard/` directly — build artifact; source is `dashboard/`.
 - Do not add blocking I/O in async functions — use `run_in_executor`.
+- **Do not publish the embedded backend address in user-facing distribution material.** The
+  service URL baked into the desktop client (`ocbot.aixifs.com/videogen` and friends) is an
+  implementation detail: the client connects to it on its own, so the download page, the
+  release notes and the README never need to name it. Say "已部署好的 Octop 服务" /
+  "the deployed Octop server" instead. This applies to `scripts/gitee/REPO_README*.md`,
+  release bodies, the packaged `README.txt` and any other text a downloader reads.
 
 ## 9. Where to look
 

@@ -11,6 +11,8 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
+import unicodedata
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -27,6 +29,58 @@ MAX_DESCRIPTION_CHARS = 2000
 MAX_ERROR_CHARS = 500
 MAX_GROUP_CHARS = 120
 MAX_CATEGORY_CHARS = 60
+
+# Labels that carry no product identity. A model asked for "a short product
+# name" sometimes answers with a generic word — most often the name of its own
+# output field ("candidates"). Such an answer must never reach the library as
+# a product name, so it is treated as "no name at all" and the caller falls
+# back to a weaker signal (the source folder) instead.
+_PLACEHOLDER_GROUP_LABELS = frozenset(
+    {
+        "candidates",
+        "candidate",
+        "group",
+        "name",
+        "unknown",
+        "unspecified",
+        "unnamed",
+        "noname",
+        "notapplicable",
+        "na",
+        "n/a",
+        "none",
+        "null",
+        "nil",
+        "todo",
+        "tbd",
+        "misc",
+        "miscellaneous",
+        "default",
+        "默认",
+        "默认名称",
+        "未知",
+        "未命名",
+        "无名称",
+        "待定",
+        "候选",
+        "候选品",
+        "其他",
+    }
+)
+
+
+def is_placeholder_group(text: str) -> bool:
+    """True when *text* names no product.
+
+    An empty string counts: it carries no identity either. Matching ignores
+    case, width, spaces, dashes and underscores so "Candidates", "candidates"
+    and "CANDIDATES " are all the same placeholder.
+    """
+    normalised = re.sub(r"[\s_\-]+", "", unicodedata.normalize("NFKC", text or "").casefold())
+    if not normalised:
+        return True
+    return normalised in _PLACEHOLDER_GROUP_LABELS
+
 
 _PROMPT = (
     "You are cataloguing a product image for a media asset library. "
@@ -134,8 +188,14 @@ def parse_categorisation_payload(raw: str) -> dict[str, Any]:
         raise ValueError("model output confidence must be a number")
     confidence = max(0.0, min(1.0, float(raw_confidence)))
 
+    group = group.strip()[:MAX_GROUP_CHARS]
+    if is_placeholder_group(group):
+        # The model named nothing worth naming; keep the field empty so the
+        # folder prior (or the user) supplies a label instead.
+        group = ""
+
     return {
-        "group": group.strip()[:MAX_GROUP_CHARS],
+        "group": group,
         "category": category.strip()[:MAX_CATEGORY_CHARS],
         "description": description.strip()[:MAX_DESCRIPTION_CHARS],
         "tags": [tag for tag in tags if tag][:MAX_TAGS],
