@@ -57,6 +57,15 @@ Navigation guide for AI coding agents working in this repository.
 One Python wheel: FastAPI backend + React dashboard + Click CLI.
 No external queue. No required services beyond an LLM provider.
 
+> **Frontend / backend deployment boundary (read before any build or deploy).** The
+> repo is one monorepo, but `dashboard/` (frontend source) and `src/octop/` (backend)
+> are **two separate deployment units**. The **only** thing crossing the boundary is
+> the build artifact `src/octop/dashboard/` (gitignored, never committed). **The
+> backend environment NEVER builds the frontend** — no `npm`/`vite`/`make build-frontend`
+> on a server or in a backend-only session. Seeing `dashboard/` source change from a
+> backend context is a **NO-OP + report**, not a build trigger. Full if-then rules:
+> `docs/deployment-boundary.md`.
+
 ### Runtime libraries
 
 Octop hosts four libraries. Put the change in the library that owns the behavior. This repo only wires users, the control-plane database, HTTP, CLI, dashboard, and cron.
@@ -231,8 +240,9 @@ make format-frontend                    # prettier write (dashboard only)
 uv run pytest -m "not live"            # full test suite (no LLM calls)
 uv run pytest tests/unit -x -q        # unit tests only, stop on first fail
 uv run pytest tests/integration -x -q # integration tests only
-cd dashboard && npx tsc -b             # frontend typecheck (after UI changes)
-make build-frontend                     # dashboard/ → src/octop/dashboard/
+cd dashboard && npx tsc -b             # [frontend-env only] frontend typecheck (after UI changes)
+make build-frontend                     # [frontend-env only] dashboard/ → src/octop/dashboard/
+bash scripts/deploy-dashboard.sh        # [frontend-env only] sync built artifact → server
 ```
 
 > ⚠️ **The commands above are the CI gate's repertoire, not the local routine.**
@@ -395,6 +405,10 @@ Boundary rules are in [§5](#5-module-boundaries). Additionally:
 - Do not import `infra/db/repos/*` from routers — use `server.services.*_repo` via `infra/` services or managers.
 - Do not write bare `pytest` — always `uv run pytest`.
 - Do not edit `src/octop/dashboard/` directly — build artifact; source is `dashboard/`.
+- **Never build the frontend from a backend environment or production server** — no `npm` /
+  `vite` / `make build-frontend` there (server has no Node and ~2.6G RAM; vite OOMs).
+  A `dashboard/` change seen in a backend context is a NO-OP + report, not a build trigger.
+  See `docs/deployment-boundary.md` (§2 decision table) — it is authoritative for this boundary.
 - Do not add blocking I/O in async functions — use `run_in_executor`.
 
 ## 9. Where to look
@@ -422,6 +436,7 @@ Boundary rules are in [§5](#5-module-boundaries). Additionally:
 | Connectors & OAuth | `infra/connectors/catalog.json` (built-in metadata + i18n), `infra/connectors/`, `api/routers/connectors.py`; human list: `docs/connectors.md` |
 | OpenAPI tags and API intro | `api/openapi_meta.py` |
 | Human-readable API reference | `docs/api.md` |
+| Frontend/backend deployment boundary (which env builds, artifact handoff) | `docs/deployment-boundary.md` (authoritative) |
 | Deployment pitfalls (path prefix, proxy, agent-running) | `docs/deployment-pitfalls.md` |
 | Windows deployment (PowerShell script, PS 5.1 quirks, SSH key ACL) | `docs/windows-deploy-script.md`; `scripts/deploy-dashboard.ps1` |
 | WeChat Open Platform login (开放平台网站应用扫码) | `docs/wechat-open-login.md` |
