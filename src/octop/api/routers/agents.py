@@ -274,19 +274,23 @@ async def list_agents(
 
     Default ``scope=mine`` returns agents owned by the authenticated user plus
     agents other users have explicitly shared.
-    Holders of the ``users`` permission (and admins) may pass ``scope=all``.
+    Holders of the ``users`` permission (and admins) may pass ``scope=all`` to
+    list every agent. Callers without that permission are *not* rejected: an
+    unauthorised ``scope=all`` silently degrades to ``scope=mine``. This keeps
+    older dashboards (which requested ``scope=all`` to populate an agent
+    dropdown) working without ever exposing other users' agents, so the data
+    isolation of ``scope=mine`` is preserved in both cases.
 
     Each row includes ``unread_count`` and ``last_active`` for the caller.
     ``last_active`` is the newest ``threads.last_active`` on that user's own
     threads (empty threads are omitted, so a never-chatted agent is ``null``).
     A shared expert does not inherit another user's activity.
     """
+    # An unauthorised scope=all degrades to mine instead of returning 403.
+    # The caller only ever sees its own (+ explicitly shared) agents, so no
+    # data leaks; the legacy dashboard's agent dropdown starts working again.
     if scope == "all" and not user_has_permission(user, "users"):
-        raise OctopError(
-            ErrorCode.FORBIDDEN,
-            "permission required",
-            details={"permission": "users"},
-        )
+        scope = "mine"
 
     assert server.app_runtime is not None
     registry = server.app_runtime.agent_registry
