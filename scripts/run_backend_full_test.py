@@ -37,11 +37,12 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 # ── 配置 ─────────────────────────────────────────────────────────────────────
+
 
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name, "").strip()
@@ -91,6 +92,7 @@ ANALYSIS_PROMPT = """后端全量测试已跑完，请分析结果并写一份�
 
 
 # ── 小工具 ───────────────────────────────────────────────────────────────────
+
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
@@ -177,6 +179,7 @@ def retry(fn, *, attempts: int = 3, delay: float = 5.0, what: str = "操作"):
 
 # ── 凭证 ─────────────────────────────────────────────────────────────────────
 
+
 def mint_admin_token(ttl_s: int) -> str:
     """本地签发 admin access token（读本地 DB 的 jwt secret，不落盘）。"""
     os.environ.setdefault("OCTOP_HOME", OCTOP_HOME)
@@ -208,6 +211,7 @@ def mint_admin_token(ttl_s: int) -> str:
 
 
 # ── 准备：模型 / agent / cron ────────────────────────────────────────────────
+
 
 def ensure_provider_model(api: Api) -> None:
     """把目标模型登记进 provider 的 models_json，否则 harness 看不到它。"""
@@ -314,6 +318,7 @@ def ensure_cron(api: Api, agent_id: str) -> str:
 
 
 # ── 第一步：脚本自己跑全量测试 ───────────────────────────────────────────────
+
 
 @dataclass
 class TestRun:
@@ -423,6 +428,7 @@ def _kill_group(proc: subprocess.Popen[bytes]) -> None:
 
 # ── 第二步：子代理分析结果 ───────────────────────────────────────────────────
 
+
 @dataclass
 class Analysis:
     attempt: int
@@ -505,6 +511,7 @@ def _job_row(api: Api, agent_id: str, cron_id: str) -> dict[str, Any]:
 
 
 # ── 报告 ─────────────────────────────────────────────────────────────────────
+
 
 def write_report(
     run: TestRun,
@@ -591,6 +598,7 @@ def write_report(
 
 # ── 预检 ─────────────────────────────────────────────────────────────────────
 
+
 def preflight(api: Api) -> None:
     if not REPO_DIR.is_dir():
         raise Fatal(f"仓库目录不存在：{REPO_DIR}")
@@ -618,13 +626,18 @@ def preflight(api: Api) -> None:
 
 # ── 入口 ─────────────────────────────────────────────────────────────────────
 
+
 def main(argv: list[str] | None = None) -> int:
     global TEST_TIMEOUT_S, ANALYSIS_TIMEOUT_S, MAX_ATTEMPTS
 
     parser = argparse.ArgumentParser(description="定时跑一次后端全量测试并用子代理分析结果")
-    parser.add_argument("--attempts", type=int, default=MAX_ATTEMPTS, help="不可跳过异常时的最大尝试次数")
+    parser.add_argument(
+        "--attempts", type=int, default=MAX_ATTEMPTS, help="不可跳过异常时的最大尝试次数"
+    )
     parser.add_argument("--timeout", type=int, default=TEST_TIMEOUT_S, help="单次测试超时秒数")
-    parser.add_argument("--analysis-timeout", type=int, default=ANALYSIS_TIMEOUT_S, help="子代理分析超时秒数")
+    parser.add_argument(
+        "--analysis-timeout", type=int, default=ANALYSIS_TIMEOUT_S, help="子代理分析超时秒数"
+    )
     parser.add_argument("--setup-only", action="store_true", help="只做预检与准备")
     parser.add_argument("--no-analysis", action="store_true", help="只跑测试，不做子代理分析")
     args = parser.parse_args(argv)
@@ -662,8 +675,13 @@ def main(argv: list[str] | None = None) -> int:
 
         if run is None or run.exception:
             detail = run.exception if run else "未知原因"
-            write_report(run or TestRun(attempt=0, log_path=REPORT_DIR / "none.log"), None,
-                         "error", f"不可跳过的异常，重试 {MAX_ATTEMPTS} 次后终止：{detail}", history)
+            write_report(
+                run or TestRun(attempt=0, log_path=REPORT_DIR / "none.log"),
+                None,
+                "error",
+                f"不可跳过的异常，重试 {MAX_ATTEMPTS} 次后终止：{detail}",
+                history,
+            )
             return 2
 
         # ── 子代理分析结果 ──
@@ -680,14 +698,17 @@ def main(argv: list[str] | None = None) -> int:
                     time.sleep(wait)
             if analysis is None or not analysis.ok:
                 detail = analysis.detail if analysis else "未执行"
-                write_report(run, analysis, "error",
-                             f"子代理分析重试 {MAX_ATTEMPTS} 次仍失败：{detail}", history)
+                write_report(
+                    run,
+                    analysis,
+                    "error",
+                    f"子代理分析重试 {MAX_ATTEMPTS} 次仍失败：{detail}",
+                    history,
+                )
                 return 2
 
         final = "pass" if run.passed else "fail"
-        detail = (
-            "全量测试通过" if run.passed else f"全量测试完成但有失败用例：{run.summary}"
-        )
+        detail = "全量测试通过" if run.passed else f"全量测试完成但有失败用例：{run.summary}"
         write_report(run, analysis, final, detail, history)
         return 0 if run.passed else 1
     except Fatal as exc:
