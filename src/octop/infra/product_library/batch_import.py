@@ -32,6 +32,7 @@ from octop.infra.product_library.vision import (
     MAX_GROUP_CHARS,
     MAX_IMAGE_BYTES,
     categorise_image,
+    is_placeholder_group,
     resolve_vision_model,
 )
 from octop.infra.utils.paths import PathLayout
@@ -96,10 +97,15 @@ def _apply_folder_prior(result: dict[str, Any], folder: str) -> dict[str, Any]:
     confident model answer is never overridden.
     """
     hint = (folder or "").strip()
+    current = str(result.get("group") or "").strip()
+    if is_placeholder_group(current):
+        # A placeholder label names nothing; treat it as no answer at all so
+        # the folder prior (or the category) can supply a real label.
+        current = ""
+        result["group"] = ""
     if not hint:
         result["group_source"] = "vision"
         return result
-    current = str(result.get("group") or "").strip()
     confidence = float(result.get("confidence") or 0.0)
     if not current or confidence < FOLDER_PRIOR_MIN_CONFIDENCE:
         result["group"] = hint[:MAX_GROUP_CHARS]
@@ -108,6 +114,32 @@ def _apply_folder_prior(result: dict[str, Any], folder: str) -> dict[str, Any]:
     else:
         result["group_source"] = "vision"
     return result
+
+
+def _resolve_product_name(
+    group: dict[str, Any],
+    rows: dict[int, dict[str, Any]],
+    excluded: set[int],
+) -> str:
+    """Product name for a reviewed group.
+
+    The label the user typed wins. A placeholder label ("candidates") carries no
+    identity, so it falls back to the folder the images came from; a group
+    without either cannot be filed.
+    """
+    name = str(group.get("name") or "").strip()
+    if name and not is_placeholder_group(name):
+        return name
+    for index in group.get("item_indices", []):
+        if index in excluded:
+            continue
+        row = rows.get(index)
+        if row is None:
+            continue
+        folder = str(row.get("folder") or "").strip()
+        if folder and not is_placeholder_group(folder):
+            return folder
+    return ""
 
 
 def _job_dir(paths: PathLayout, owner_id: int, job_id: str) -> Path:
@@ -297,7 +329,9 @@ async def analyse_upload(
             key,
             {
                 "key": key,
-                "suggested_name": result["group"] or "",
+                # The model's group label, else its category — never blank, so the
+                # wizard always offers a label the user can edit.
+                "suggested_name": result["group"] or result["category"] or "",
                 "category": result["category"] or "",
                 "items": [],
             },
@@ -359,7 +393,7 @@ def commit_import(
                 raise PermissionError("product does not belong to this user")
             reused_products += 1
         else:
-            name = str(group.get("name") or "").strip()
+            name = _resolve_product_name(group, rows, excluded)
             if not name:
                 # A group with no name and no target product cannot be filed.
                 failures.append({"filename": "(group)", "reason": "missing product name"})
