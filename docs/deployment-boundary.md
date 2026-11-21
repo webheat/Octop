@@ -16,7 +16,7 @@
 | 判据 | 前端环境 | 后端环境 |
 |------|---------|---------|
 | 典型载体 | 本地开发机 / 前端 CI job | 生产服务器 `ocdev.aixifs.com` / 后端 CI job |
-| 有 Node/npm | 有（`dashboard/node_modules` 可 `npm ci`） | **无**（服务器不装 Node） |
+| 有 Node/npm | 有（`dashboard/node_modules` 可 `npm ci`） | **默认 PATH 里无**（本机 nvm 目录下装了，但**不得使用**，见下） |
 | 可写源码 | `dashboard/` 可写 | 只读 / 根本没有 `dashboard/` 源码 |
 | 你的交付物 | `src/octop/dashboard/` 里的静态文件 | 运行中的 `octop.service` |
 
@@ -24,6 +24,10 @@
 后端环境通过 `git pull` 拿到的永远是后端源码，不是前端源码。因此"后端环境发现前端代码
 变化"在正常情况下**不可能发生**——如果你在后端环境看到了 `dashboard/` 的变化，说明你
 处在共享工作区里，此时你的身份是后端，**正确动作依然是 NO-OP**（见 §2）。
+
+**本机（`/opt/Octop`，后端环境）的具体形态**：`dashboard/` 源码与 `src/octop/dashboard/`
+产物同处一棵树（共享工作区）；Node 装在 `/root/.nvm/` 下但**不在默认 PATH**。这些都
+不改变判定——身份是后端，动作是 NO-OP。真正兜底的是 §4 的内存约束，不是"没有 Node"。
 
 ---
 
@@ -97,7 +101,7 @@ LLM 面对变化必须产生一个动作；如果你不选择 NO-OP，就会默�
 
 ## 5. 门禁清单（不依赖"理解"，靠机制兜底）
 
-- [x] 生产机不安装 Node/npm（最强约束：物理上无法构建）
+- [x] 生产机默认 PATH 不含 Node/npm（nvm 里即使装了也不使用；最强的物理约束其实是内存，见 §4）
 - [x] `.gitignore:83` 排除产物目录，前后端源码/产物不混入版本库
 - [x] `deploy-dashboard.sh` 产物新鲜度闸门 + 入口 hash 校验 + 自动备份
 - [ ] CI 拆成 frontend build job（产出 artifact）与 backend deploy job（只下载，无 npm）
