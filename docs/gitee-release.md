@@ -80,6 +80,10 @@ Gitee Release 附件（都 < 100 MB）：
 
 ### 1. Gitee 仓库
 
+> **最新口径（2026-11-21，以此为准）**：客户端构建产物**直接发布到本仓库**的
+> Release 附件。渠道矩阵见 [RELEASE-MATRIX.md §3](./RELEASE-MATRIX.md#3-分发渠道)。
+> 下文「从 GitHub Release 拉取附件」是既有的 CI 中转实现描述；渠道归属以本条为准。
+
 发布目标：**`https://gitee.com/webheat/octop_client.git`**（`owner=webheat`，
 `repo=octop_client`），公开仓库。
 
