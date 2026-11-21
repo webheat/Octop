@@ -262,7 +262,7 @@ export default function ProductLibraryPage() {
         message.error(t("productLibrary.failed"));
       }
     });
-    void request<OctopAgent[]>("/agents?scope=all")
+    void request<OctopAgent[]>("/agents")
       .then(
         (rows) =>
           version === ownerVersion.current &&
@@ -1606,31 +1606,33 @@ export default function ProductLibraryPage() {
                     {t("productLibrary.downloadPackage")}
                   </Button>
                 )}
-                <details>
-                  <summary style={{ cursor: "pointer" }}>
-                    {t("productLibrary.advancedAgentSync")}
-                  </summary>
-                  <Space wrap style={{ marginTop: 8 }}>
-                    <Select
-                      showSearch
-                      placeholder={t("productLibrary.selectAgent")}
-                      value={agentId || undefined}
-                      onChange={setAgentId}
-                      style={{ width: 220 }}
-                      options={agents.map((a) => ({
-                        value: a.agent_id,
-                        label: a.name,
-                      }))}
-                    />
-                    <Button
-                      loading={preparingId === p.id}
-                      disabled={!agents.length}
-                      onClick={() => void prepare(p)}
-                    >
-                      {t("productLibrary.prepareRender")}
-                    </Button>
-                  </Space>
-                </details>
+                {!isDesktop && (
+                  <details>
+                    <summary style={{ cursor: "pointer" }}>
+                      {t("productLibrary.advancedAgentSync")}
+                    </summary>
+                    <Space wrap style={{ marginTop: 8 }}>
+                      <Select
+                        showSearch
+                        placeholder={t("productLibrary.selectAgent")}
+                        value={agentId || undefined}
+                        onChange={setAgentId}
+                        style={{ width: 220 }}
+                        options={agents.map((a) => ({
+                          value: a.agent_id,
+                          label: a.name,
+                        }))}
+                      />
+                      <Button
+                        loading={preparingId === p.id}
+                        disabled={!agents.length}
+                        onClick={() => void prepare(p)}
+                      >
+                        {t("productLibrary.prepareRender")}
+                      </Button>
+                    </Space>
+                  </details>
+                )}
                 <Button
                   danger
                   loading={deletingProjectId === p.id}
@@ -1755,8 +1757,15 @@ export default function ProductLibraryPage() {
                 {t("productLibrary.importBack")}
               </Button>
             )}
-            <Button onClick={() => setImportOpen(false)}>
-              {t("productLibrary.importCancel")}
+            <Button
+              type={importStep === 2 ? "primary" : undefined}
+              onClick={() => setImportOpen(false)}
+            >
+              {t(
+                importStep === 2
+                  ? "productLibrary.importFinish"
+                  : "productLibrary.importCancel",
+              )}
             </Button>
             {importStep === 0 && (
               <Button

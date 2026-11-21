@@ -545,6 +545,7 @@
     "importCancel": "Cancel",
     "importConfirm": "Confirm & archive",
     "importDone": "Import complete",
+    "importFinish": "Done",
     "importResult": "Created {{products}} products, imported {{assets}} images, skipped {{duplicates}} duplicates",
     "importSkipped": "Skipped {{count}} non-image files",
     "importFailedCount": "{{count}} images failed recognition",

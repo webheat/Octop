@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,8 @@ const api = vi.hoisted(() => ({
   upload: vi.fn(),
   createProduct: vi.fn(),
   deleteProject: vi.fn(),
+  analyzeImport: vi.fn(),
+  commitImport: vi.fn(),
   downloadAsset: vi.fn().mockResolvedValue(new Blob()),
 }));
 vi.mock("../../api/modules/productLibrary", async () => {
@@ -234,5 +236,68 @@ describe("product library MVP", () => {
         screen.queryByRole("button", { name: "productLibrary.continueVideo" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("shows Done instead of Cancel once the directory import has completed", async () => {
+    const user = userEvent.setup();
+    api.analyzeImport.mockResolvedValue({
+      job_id: "job-1",
+      total: 1,
+      groups: [
+        {
+          key: "g1",
+          suggested_name: "Bag",
+          category: "bags",
+          items: [
+            {
+              index: 0,
+              filename: "front.png",
+              relative_path: "front.png",
+              folder: "bag",
+              confidence: 0.9,
+              description: "",
+              tags: [],
+              group_source: "vision",
+              duplicate: false,
+            },
+          ],
+        },
+      ],
+      skipped: [],
+      failed: [],
+    });
+    api.commitImport.mockResolvedValue({
+      created_products: 1,
+      reused_products: 0,
+      imported_assets: 1,
+      skipped_duplicates: 0,
+      failed: [],
+    });
+    renderPage();
+
+    await user.click(
+      screen.getByRole("button", { name: "productLibrary.importDirectory" }),
+    );
+    const imagePicker = document.querySelector(
+      'input[type="file"][accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.avif"]',
+    ) as HTMLInputElement;
+    fireEvent.change(imagePicker, {
+      target: { files: [new File(["x"], "front.png", { type: "image/png" })] },
+    });
+    await user.click(
+      screen.getByRole("button", { name: "productLibrary.importAnalyze" }),
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "productLibrary.importConfirm",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "productLibrary.importFinish" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "productLibrary.importCancel" }),
+    ).not.toBeInTheDocument();
   });
 });
