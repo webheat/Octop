@@ -18,15 +18,14 @@
 #       --host 1.14.182.208 --host 175.178.33.107 \
 #       --upload
 #   # SSH 端口默认 13122，Web 根目录默认 /opt/dw.mengxa.com（可用环境变量覆盖）
-#   # 推荐：manifest 内每个 part 的 urls[] 写「https 域名(主) + http 域名(兜底) + IP(末兜底)」，
-#   # 客户端 bootstrap 逐个探测。实测 dw 四节点 HTTPS 配置不一（.87 SNI 错、8.134 证书过期、
-#   # 仅 .107/.1.14 的 https 可用；HTTP 则 .87 可用），单用任一 scheme 都会命中坏节点：
+#   # 推荐：manifest 内每个 part 的 urls[] 只写域名两档「https 域名(主) + http 域名(兜底)」，
+#   # 客户端 bootstrap 逐个探测。2026-11-20 起不再写 IP 直连地址，统一走 dw.mengxa.com；
+#   # 前提是 DNS 每个节点在 HTTP 上都真的出文件（1.14.182.208 已改为 80 端口直接出文件）。
 #   #   ./scripts/release-video-components.sh \
 #   #       --base-url https://dw.mengxa.com/video-components/1.4.0/win-x64 \
 #   #       --mirror http://dw.mengxa.com/video-components/1.4.0/win-x64 \
-#   #       --mirror http://175.178.192.87/video-components/1.4.0/win-x64 \
 #   #       --host ... --upload
-#   # 客户端注入同样用逗号分隔多 URL：defaultVideoComponentsURL=https域名,http域名,IP
+#   # 客户端注入同样用逗号分隔多 URL：defaultVideoComponentsURL=https域名,http域名
 #
 #   # 3) 只校验远端已发布的包（逐台 SSH 比对 sha256；不打包不上传）
 #   ./scripts/release-video-components.sh --base-url ... --verify-only --host ...
