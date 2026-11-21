@@ -86,8 +86,10 @@ journalctl -u octop-backend-full-test.service -n 100  # 或看日志文件
 
 ## 注意事项
 
-- **不要用 `uv run`** —— 它会联网同步依赖，内网 PyPI 源不可达（`pillow 13.0.0`
-  拉不到）。脚本直接用 venv 里的解释器。
+- **脚本直接用 venv 解释器**（`/opt/Octop/.venv/bin/python`），不依赖运行时联网同步依赖。
+  内网 PyPI 源 `192.168.20.173:4874` 已下线，包源已切到腾讯云公网镜像
+  （`pyproject.toml` 的 `[tool.uv] index-url` + `uv.lock`），`uv run` 现在也能用，
+  但定时任务不碰网络更稳。
 - **免费模型会限流** —— `qiniu/conatus-free` 有全局请求上限，429 时分析步骤会退避
   重试（60s / 120s），3 次仍失败才终止。
 - **测试跑在生产机上**，与线上服务并行。pytest 是串行执行（没用 `-n auto`），
