@@ -52,6 +52,23 @@ desktop_pkg_basename() {
   esac
 }
 
+# No-install zip (Windows only): the bare client exe inside an archive, no
+# NSIS installer. Windows blocks unsigned installers, so the zip is the
+# distribution form end users can unpack without an installer.
+#   desktop_green_zip_basename windows-amd64           → remote client
+#   desktop_green_zip_basename windows-amd64 slim      → runtime fetched on first launch
+desktop_green_zip_basename() {
+  local plat="$1"
+  local variant="${2:-desktop}"
+  case "$plat" in
+    windows-*) echo "Octop-${variant}-${plat}-$(octop_version).zip" ;;
+    *)
+      echo "unknown platform: ${plat}" >&2
+      return 1
+      ;;
+  esac
+}
+
 # Map GitHub Actions RUNNER_ARCH (X64/ARM64/...) → green arch suffix.
 runner_arch_to_green() {
   case "$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')" in
