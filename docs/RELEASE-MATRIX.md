@@ -122,8 +122,12 @@ http://175.178.192.87/...   （末兜底，IP 直连）
 |---|---|---|
 | **GitHub Release** | 运行时 zip（246 MB）、安装包 | 无 100 MB 限制 |
 | **CNB**（cnb.cool） | 镜像 + quality-gate（仅 main:push/tag） | 推任意 tag 触发整条发行流水线 |
-| **Gitee**（webheat/octop_client） | 仅「远程版客户端 + 视频制作组件」 | 单附件 100 MB 上限；slim exe 与 Python 包**不**上 Gitee |
+| **Gitee**（`https://gitee.com/webheat/octop_client.git`） | **客户端构建产物直接发布到此仓库**（Release 附件） | 单附件 100 MB 上限；slim exe 与 Python 包**不**上 Gitee |
 | **dw.mengxa.com** | 运行时分片 + 视频组件（多节点 CDN） | 客户端按需下载 |
+
+> **Gitee 发布仓口径**：客户端构建产物**直接发布到
+> `https://gitee.com/webheat/octop_client.git`**（`owner=webheat`，`repo=octop_client`），
+> 以该仓库的 Release 附件形式交付。源码仍只在 GitHub / CNB，此仓库只放客户端产物。
 
 > Gitee 分发范围收窄是明确决定：完整安装器 200–340 MB 超 100 MB 上限，故改 slim 首启拉运行时；
 > 下载页与 Release 说明都按 tag/owner/repo 动态渲染，防止指向旧版本。
