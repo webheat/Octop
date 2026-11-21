@@ -89,6 +89,7 @@ log INFO "legacy skills 目录补齐：$added 个 agent 工作区"
 cd "$REPO" && "$REPO/.venv/bin/python" - <<'PY' 2>&1 | tee -a "$LOG"
 import os
 import sqlite3
+import time
 
 from octop.infra.product_library.vision import is_placeholder_group
 
@@ -106,7 +107,7 @@ try:
         new_name = (category or "").strip() or "未命名分组"
         conn.execute(
             "UPDATE product_library_products SET name = ?, updated_at = ? WHERE id = ?",
-            (new_name, int(os.time.time()), pid),
+            (new_name, int(time.time()), pid),
         )
         renamed.append((pid, owner, name, new_name))
     conn.commit()
