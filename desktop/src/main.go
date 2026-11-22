@@ -91,6 +91,7 @@ type App struct {
 	// talks to that origin.
 	dashboardBase string
 	runtimeNonce  string
+	libraryNonce  string
 
 	// minimalLandingPath is the product-library path the shell keeps the
 	// browser on while minimal mode is enabled ("" when disabled).
@@ -427,6 +428,7 @@ func (a *App) installDragOverlay() {
 	a.window.ExecJS(fileDropJS())
 	a.installVideoBridge()
 	a.installRuntimeBridge()
+	a.installLibraryBridge()
 	a.installMinimalMode()
 	a.installDesktopFrontendMarker()
 }
@@ -531,6 +533,7 @@ func main() {
 	}
 	api.videoNonce, _ = randomToken()
 	api.runtimeNonce, _ = randomToken()
+	api.libraryNonce, _ = randomToken()
 
 	app := application.New(application.Options{
 		Name:        "Octop",
@@ -559,6 +562,7 @@ func main() {
 	attachFileDropEventListener(app, api)
 	attachVideoEventListener(app, api, api.videoNonce)
 	attachRuntimeEventListener(app, api, api.runtimeNonce)
+	attachLibraryEventListener(app, api, api.libraryNonce)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
 		applyAppIcon(app)
 		lock.listen(func() { application.InvokeAsync(api.showWindow) })

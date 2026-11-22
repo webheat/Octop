@@ -24,6 +24,7 @@ SIDEBAR_NAV_KEYS = frozenset(
     {
         "chat",
         "product-library",
+        "local-library",
         "experts",
         "tasks",
         "token-usage",

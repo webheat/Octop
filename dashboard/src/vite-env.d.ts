@@ -37,6 +37,19 @@ declare global {
         payload?: Record<string, unknown>,
       ): Promise<unknown>;
     };
+    /**
+     * The shell's local-first library bridge (PRD §3.7). Material bytes stay
+     * on the client machine; the remote server is used only for AI recognition.
+     * Absent in the browser, so feature detection gates every call.
+     */
+    octopDesktopLibrary?: {
+      version: number;
+      request(
+        action: string,
+        token: string,
+        payload?: Record<string, unknown>,
+      ): Promise<unknown>;
+    };
   }
 }
 

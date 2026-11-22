@@ -73,6 +73,7 @@ export interface NavSection {
 export const SIDEBAR_NAV_KEYS = [
   "chat",
   "product-library",
+  "local-library",
   "experts",
   "tasks",
   "token-usage",
@@ -207,6 +208,12 @@ export function buildNavSections(
       path: "/product-library",
       icon: <Package size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.productLibrary",
+    },
+    {
+      key: "local-library",
+      path: "/local-library",
+      icon: <HardDrive size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.localLibrary",
     },
   ];
   // 产品要求隐藏以下三个入口（专家 / 自动化 / Token 统计）。
