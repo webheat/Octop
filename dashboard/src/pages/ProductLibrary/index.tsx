@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { isLocalLibraryAvailable } from "../../api/localLibrary";
 import {
   productLibraryApi,
   type ImportCommitGroup,
@@ -108,6 +109,15 @@ export default function ProductLibraryPage() {
   const tRef = useRef(t);
   tRef.current = t;
   const navigate = useNavigate();
+
+  // Desktop shell: the hosted product library is retired in favour of the
+  // on-machine library (PRD §3.7). Redirect stale links/bookmarks so no hosted
+  // material is ever downloaded from the server. Web console is unaffected.
+  useEffect(() => {
+    if (isLocalLibraryAvailable()) {
+      navigate("/local-library", { replace: true });
+    }
+  }, [navigate]);
   const currentUser = useCurrentUser();
   const ownerId = currentUser?.id;
   const { bridgeAvailable: isDesktop } = useDesktopVideoJobs();

@@ -203,9 +203,14 @@ func (a *App) libraryAction(action, token string, payload map[string]json.RawMes
 		rec := a.video.jobs[id]
 		var snap any
 		if rec != nil {
+			// snapshot() fills VideoURL from the local stream when rendering
+			// completed, so the local library can preview/download the result
+			// without any server round-trip.
+			job := a.video.snapshot(rec)
 			snap = map[string]any{
-				"id": rec.Job.ID, "state": rec.Job.State,
-				"progress": rec.Job.Progress, "errorCode": rec.Job.ErrorCode,
+				"id": job.ID, "state": job.State,
+				"progress": job.Progress, "errorCode": job.ErrorCode,
+				"videoUrl": job.VideoURL,
 			}
 		}
 		a.video.mu.Unlock()

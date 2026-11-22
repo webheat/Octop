@@ -8461,6 +8461,7 @@
     "renderFailed": "生成失败，请检查视频环境后重试",
     "planReady": "分镜就绪：{{scenes}} 个场景（{{generator}}）",
     "jobState": "任务状态：{{state}}",
+    "downloadVideo": "下载成片",
     "state.preparing": "准备中",
     "state.downloading": "下载中",
     "state.rendering": "渲染中",

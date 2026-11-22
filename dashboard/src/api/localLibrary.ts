@@ -164,6 +164,7 @@ export const localLibrary = {
     state: string;
     progress?: number | null;
     errorCode?: string;
+    videoUrl?: string;
   }> {
     return call("jobStatus", { id });
   },

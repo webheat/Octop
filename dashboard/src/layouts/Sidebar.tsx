@@ -455,7 +455,13 @@ export default function Sidebar({
   const showChatRailToggle = !isMinimal;
   const chatRailOpen = showChatRailToggle && onChatPath && chatSidebarOpen;
   const catalog = useMemo(
-    () => hideTempNavItems(buildNavSections(user, { mobileEnabled })),
+    () =>
+      hideTempNavItems(
+        buildNavSections(user, {
+          mobileEnabled,
+          isDesktop: isDesktopShellContext(),
+        }),
+      ),
     [user, mobileEnabled],
   );
   const [savedLayout, setSavedLayout] = useState<SidebarNavLayout | null>(null);

@@ -42,6 +42,7 @@ interface JobState {
   state: string;
   progress?: number | null;
   errorCode?: string;
+  videoUrl?: string;
 }
 
 interface ReviewGroup {
@@ -614,10 +615,26 @@ export default function LocalLibraryPage() {
                   })}
                 </Title>
                 {jobPercent !== undefined ? (
-                  <Progress percent={jobPercent} status="active" />
+                  <Progress
+                    percent={jobPercent}
+                    status={job.state === "completed" ? "success" : "active"}
+                  />
                 ) : null}
                 {job.errorCode ? (
                   <Text type="danger">{job.errorCode}</Text>
+                ) : null}
+                {job.state === "completed" && job.videoUrl ? (
+                  <Space direction="vertical" style={{ marginTop: 12, width: "100%" }}>
+                    <video
+                      src={job.videoUrl}
+                      controls
+                      playsInline
+                      style={{ width: "100%", maxWidth: 480, borderRadius: 8 }}
+                    />
+                    <a href={job.videoUrl} download="video.mp4">
+                      {t("localLibrary.downloadVideo")}
+                    </a>
+                  </Space>
                 ) : null}
               </div>
             ) : null}

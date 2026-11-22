@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { isLocalLibraryAvailable } from "../../api/localLibrary";
 import {
   productLibraryApi,
   type BgmOptions,
@@ -225,6 +226,16 @@ export default function ProductVideoWizardPage() {
   const productIdRef = useRef<string | null>(null);
   const tRef = useRef(t);
   tRef.current = t;
+
+  // Desktop shell: the server-backed wizard is retired (PRD §3.7). Material
+  // bytes and classification live on this machine, so any attempt to open the
+  // hosted wizard is redirected to the local library — which never downloads
+  // material from the server. Web console keeps the wizard unchanged.
+  useEffect(() => {
+    if (isLocalLibraryAvailable()) {
+      navigate("/local-library", { replace: true });
+    }
+  }, [navigate]);
 
   useEffect(() => {
     if (!environmentSupported || environmentStatus.state !== "unknown") return;

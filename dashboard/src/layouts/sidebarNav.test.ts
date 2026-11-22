@@ -81,4 +81,16 @@ describe("sidebarNav", () => {
     expect(keys).toContain("chat");
     expect(keys).toContain("product-library");
   });
+
+  it("retires the hosted library and wizard in the desktop shell", () => {
+    const keys = buildNavSections(adminUser, {
+      mobileEnabled: true,
+      isDesktop: true,
+    })
+      .flatMap((section) => section.items)
+      .map((item) => item.key);
+    expect(keys).toContain("local-library");
+    expect(keys).not.toContain("product-library");
+    expect(keys).not.toContain("video-wizard");
+  });
 });

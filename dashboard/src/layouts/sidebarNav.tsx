@@ -194,8 +194,13 @@ export function hideTempNavItems(sections: NavSection[]): NavSection[] {
 
 export function buildNavSections(
   user: OctopUser | null,
-  opts?: { mobileEnabled?: boolean },
+  opts?: { mobileEnabled?: boolean; isDesktop?: boolean },
 ): NavSection[] {
+  // In the desktop shell the hosted product library and the server-backed
+  // video wizard are retired: material and classification live on this machine
+  // (PRD §3.7), so the single production entry is the local library. The web
+  // console keeps both hosted entries unchanged.
+  const isDesktop = opts?.isDesktop === true;
   const topItems: NavItem[] = [
     {
       key: "chat",
@@ -203,19 +208,21 @@ export function buildNavSections(
       icon: <MessageSquareText size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.chat",
     },
-    {
+  ];
+  if (!isDesktop) {
+    topItems.push({
       key: "product-library",
       path: "/product-library",
       icon: <Package size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.productLibrary",
-    },
-    {
-      key: "local-library",
-      path: "/local-library",
-      icon: <HardDrive size={iconSize} strokeWidth={iconStroke} />,
-      labelKey: "nav.localLibrary",
-    },
-  ];
+    });
+  }
+  topItems.push({
+    key: "local-library",
+    path: "/local-library",
+    icon: <HardDrive size={iconSize} strokeWidth={iconStroke} />,
+    labelKey: isDesktop ? "nav.videoProduction" : "nav.localLibrary",
+  });
   // 产品要求隐藏以下三个入口（专家 / 自动化 / Token 统计）。
   // 需要恢复时取消下面三段的注释，并恢复顶部对应的三个 icon import 即可。
   // if (navAllowed(user, "experts")) {
@@ -246,13 +253,16 @@ export function buildNavSections(
 
   // Video tooling is visible to everyone; the paid analysis entry is dimmed
   // for account types without the paid-tier entitlement.
-  const videoItems: NavItem[] = [
-    {
+  const videoItems: NavItem[] = [];
+  if (!isDesktop) {
+    videoItems.push({
       key: "video-wizard",
       path: "/product-library/video-wizard",
       icon: <Clapperboard size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.videoProduction",
-    },
+    });
+  }
+  videoItems.push(
     {
       key: "video-environment",
       path: "/video-environment",
@@ -268,7 +278,7 @@ export function buildNavSections(
       disabled: !isPaidTierUser(user),
       disabledReasonKey: "nav.videoAnalysisLockedHint",
     },
-  ];
+  );
   sections.push({ id: "video", groupKey: "nav.video", items: videoItems });
 
   const settingsItems: NavItem[] = [];
