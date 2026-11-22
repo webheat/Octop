@@ -33,6 +33,7 @@ class BackupManifest:
     includes_plugins: bool = False
     includes_knowledge: bool = False
     includes_chats: bool = True
+    includes_product_library: bool = False
 
     def to_json(self) -> str:
         payload: dict[str, Any] = {
@@ -50,6 +51,7 @@ class BackupManifest:
             "includes_plugins": self.includes_plugins,
             "includes_knowledge": self.includes_knowledge,
             "includes_chats": self.includes_chats,
+            "includes_product_library": self.includes_product_library,
             "agents": [asdict(a) for a in self.agents],
         }
         return json.dumps(payload, indent=2, ensure_ascii=False)
@@ -89,6 +91,12 @@ class BackupManifest:
             ),
             # Legacy archives dumped the full database; missing key means chats are present.
             includes_chats=bool(data["includes_chats"]) if "includes_chats" in data else True,
+            # Older archives never packed ~/.octop/product-library.
+            includes_product_library=(
+                bool(data["includes_product_library"])
+                if "includes_product_library" in data
+                else False
+            ),
         )
 
     @classmethod

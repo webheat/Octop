@@ -38,6 +38,9 @@ def backup() -> None:
 @click.option("--no-skill-packages", is_flag=True, help="Do not include global skill packages.")
 @click.option("--no-plugins", is_flag=True, help="Do not include installed plugins.")
 @click.option("--no-knowledge", is_flag=True, help="Do not include knowledge base files.")
+@click.option(
+    "--no-product-library", is_flag=True, help="Do not include product-library media files."
+)
 @click.option("--include-chats", is_flag=True, help="Include chat history (omitted by default).")
 def create(
     output: Path | None,
@@ -47,6 +50,7 @@ def create(
     no_skill_packages: bool,
     no_plugins: bool,
     no_knowledge: bool,
+    no_product_library: bool,
     include_chats: bool,
 ) -> None:
     """Create a selected-content backup archive."""
@@ -71,6 +75,7 @@ def create(
                 include_plugins=not no_plugins,
                 include_knowledge=not no_knowledge,
                 include_chats=include_chats,
+                include_product_library=not no_product_library,
             )
             if output is None:
                 entry = place_backup_file(paths, suggested, tmp_path)
@@ -109,6 +114,7 @@ def auto_status(home: Path | None) -> None:
     click.echo(f"include_plugins: {backup_cfg.include_plugins}")
     click.echo(f"include_knowledge: {backup_cfg.include_knowledge}")
     click.echo(f"include_chats: {backup_cfg.include_chats}")
+    click.echo(f"include_product_library: {backup_cfg.include_product_library}")
     click.echo("note: the scheduler only runs inside an active `octop run` process")
 
 
@@ -137,6 +143,7 @@ def auto_run(home: Path | None) -> None:
             include_plugins=config.backup.include_plugins,
             include_knowledge=config.backup.include_knowledge,
             include_chats=config.backup.include_chats,
+            include_product_library=config.backup.include_product_library,
         )
     finally:
         db.close()

@@ -1285,3 +1285,125 @@ def test_refuse_cross_engine_restore(layout: PathLayout, tmp_path: Path) -> None
         )
     assert excinfo.value.code == ErrorCode.BACKUP_DRIVER_MISMATCH
     pool.close()
+
+
+def test_backup_packs_product_library_and_restore_counts_files(
+    layout: PathLayout, tmp_path: Path
+) -> None:
+    """A backup that includes product-library packs the media and restores it."""
+    pool = SqlitePool(layout.db)
+    run_migrations(pool)
+    media = layout.product_library_dir / "7" / "image" / "pic.png"
+    media.parent.mkdir(parents=True, exist_ok=True)
+    media.write_bytes(b"png-bytes")
+    (layout.product_library_dir / "7" / "image" / "other.png").write_bytes(b"more-png")
+
+    class Row:
+        agent_id = "agent01"
+        name = "Test"
+
+    archive = tmp_path / "with-product-library.tar.gz"
+    create_system_backup(
+        paths=layout,
+        agent_rows=[Row()],
+        pool=pool,
+        db_config=DatabaseConfig(),
+        dest=archive,
+        include_product_library=True,
+    )
+    pool.close()
+
+    with tarfile.open(archive, mode="r:gz") as tf:
+        names = set(tf.getnames())
+        manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
+    assert manifest["includes_product_library"] is True
+    assert "product-library/7/image/pic.png" in names
+    assert "product-library/7/image/other.png" in names
+
+    restore_layout = PathLayout(layout.root.parent / "restored-product-library")
+    restore_pool = SqlitePool(restore_layout.db)
+    run_migrations(restore_pool)
+    result = restore_system_backup(
+        archive,
+        paths=restore_layout,
+        pool=restore_pool,
+        db_config=DatabaseConfig(),
+        restore_config=False,
+    )
+    restore_pool.close()
+
+    assert result["product_library_files"] == 2
+    restored = restore_layout.product_library_dir / "7" / "image" / "pic.png"
+    assert restored.read_bytes() == b"png-bytes"
+
+
+def test_backup_can_omit_product_library(layout: PathLayout, tmp_path: Path) -> None:
+    """include_product_library=False keeps the media out of the archive."""
+    pool = SqlitePool(layout.db)
+    run_migrations(pool)
+    media = layout.product_library_dir / "7" / "image" / "pic.png"
+    media.parent.mkdir(parents=True, exist_ok=True)
+    media.write_bytes(b"png-bytes")
+
+    class Row:
+        agent_id = "agent01"
+        name = "Test"
+
+    archive = tmp_path / "without-product-library.tar.gz"
+    create_system_backup(
+        paths=layout,
+        agent_rows=[Row()],
+        pool=pool,
+        db_config=DatabaseConfig(),
+        dest=archive,
+        include_product_library=False,
+    )
+    pool.close()
+
+    with tarfile.open(archive, mode="r:gz") as tf:
+        names = set(tf.getnames())
+        manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
+    assert manifest["includes_product_library"] is False
+    assert not any(name.startswith("product-library/") for name in names)
+
+    restore_layout = PathLayout(layout.root.parent / "restored-no-product-library")
+    restore_pool = SqlitePool(restore_layout.db)
+    run_migrations(restore_pool)
+    result = restore_system_backup(
+        archive,
+        paths=restore_layout,
+        pool=restore_pool,
+        db_config=DatabaseConfig(),
+        restore_config=False,
+    )
+    restore_pool.close()
+
+    assert result["product_library_files"] == 0
+    assert not restore_layout.product_library_dir.exists()
+
+
+def test_legacy_manifest_defaults_product_library_omitted() -> None:
+    """Archives written before product-library support must read as omitted."""
+    loaded = BackupManifest.from_dict(
+        {
+            "manifest_version": 1,
+            "octop_version": "0.0.0",
+            "schema_version": 1,
+            "created_at": "t",
+            "home": "/tmp",
+        }
+    )
+    assert loaded.includes_product_library is False
+
+
+def test_manifest_roundtrip_preserves_product_library_flag() -> None:
+    m = BackupManifest(
+        manifest_version=MANIFEST_VERSION,
+        octop_version="0.0.0",
+        schema_version=1,
+        created_at="t",
+        home="/tmp",
+        includes_product_library=True,
+    )
+    loaded = BackupManifest.load_text(m.to_json())
+    assert loaded.includes_product_library is True

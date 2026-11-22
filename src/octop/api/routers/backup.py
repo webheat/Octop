@@ -57,6 +57,7 @@ class AutoBackupSettingsBody(BaseModel):
     include_plugins: bool = True
     include_knowledge: bool = True
     include_chats: bool = False
+    include_product_library: bool = True
 
 
 class CreateBackupBody(BaseModel):
@@ -66,6 +67,7 @@ class CreateBackupBody(BaseModel):
     include_plugins: bool = True
     include_knowledge: bool = True
     include_chats: bool = False
+    include_product_library: bool = True
 
 
 def _agent_rows(server: Any) -> list[Any]:
@@ -90,6 +92,7 @@ def _auto_settings_payload(server: Any) -> dict[str, Any]:
         "include_plugins": backup.include_plugins,
         "include_knowledge": backup.include_knowledge,
         "include_chats": backup.include_chats,
+        "include_product_library": backup.include_product_library,
         "scheduled": scheduled,
     }
 
@@ -121,6 +124,7 @@ def _create_and_store_manual_backup(
             include_plugins=options.include_plugins,
             include_knowledge=options.include_knowledge,
             include_chats=options.include_chats,
+            include_product_library=options.include_product_library,
         )
         return place_backup_file(paths, filename, tmp_path)
 
@@ -172,6 +176,7 @@ def _create_ephemeral_backup(
             include_plugins=options.include_plugins,
             include_knowledge=options.include_knowledge,
             include_chats=options.include_chats,
+            include_product_library=options.include_product_library,
         )
     except Exception:
         tmp_path.unlink(missing_ok=True)
@@ -383,6 +388,7 @@ async def export_backup(
     include_plugins: bool = Query(default=True),
     include_knowledge: bool = Query(default=True),
     include_chats: bool = Query(default=False),
+    include_product_library: bool = Query(default=True),
     _: Any = Depends(require_permission("backup")),
     server: Any = Depends(get_server),
 ) -> FileResponse:
@@ -403,6 +409,7 @@ async def export_backup(
                 include_plugins=include_plugins,
                 include_knowledge=include_knowledge,
                 include_chats=include_chats,
+                include_product_library=include_product_library,
             ),
         )
     background_tasks.add_task(_unlink_quiet, tmp_path)

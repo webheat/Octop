@@ -192,6 +192,7 @@ export default function BackupRestorePanel() {
   const [includePlugins, setIncludePlugins] = useState(true);
   const [includeKnowledge, setIncludeKnowledge] = useState(true);
   const [includeChats, setIncludeChats] = useState(false);
+  const [includeProductLibrary, setIncludeProductLibrary] = useState(true);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreConfig, setRestoreConfig] = useState(true);
   const [pendingRestore, setPendingRestore] = useState<BackupFileItem | null>(
@@ -210,6 +211,8 @@ export default function BackupRestorePanel() {
   const [autoIncludePlugins, setAutoIncludePlugins] = useState(true);
   const [autoIncludeKnowledge, setAutoIncludeKnowledge] = useState(true);
   const [autoIncludeChats, setAutoIncludeChats] = useState(false);
+  const [autoIncludeProductLibrary, setAutoIncludeProductLibrary] =
+    useState(true);
   const [autoScheduled, setAutoScheduled] = useState(false);
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -230,6 +233,7 @@ export default function BackupRestorePanel() {
     setAutoIncludePlugins(data.include_plugins);
     setAutoIncludeKnowledge(data.include_knowledge);
     setAutoIncludeChats(data.include_chats);
+    setAutoIncludeProductLibrary(data.include_product_library);
     setAutoScheduled(Boolean(data.scheduled));
     setSchedulePreset(
       PRESET_SCHEDULES.has(data.schedule) ? data.schedule : "custom",
@@ -303,6 +307,7 @@ export default function BackupRestorePanel() {
       include_plugins: includePlugins,
       include_knowledge: includeKnowledge,
       include_chats: includeChats,
+      include_product_library: includeProductLibrary,
     });
     if (ok) setCreateOpen(false);
   };
@@ -320,6 +325,7 @@ export default function BackupRestorePanel() {
         include_plugins: autoIncludePlugins,
         include_knowledge: autoIncludeKnowledge,
         include_chats: autoIncludeChats,
+        include_product_library: autoIncludeProductLibrary,
       });
       applyAutoSettings(data);
       message.success(t("backup.autoSaveSuccess"));
@@ -723,6 +729,15 @@ export default function BackupRestorePanel() {
                 >
                   {t("backup.includeChats")}
                 </Checkbox>
+                <Checkbox
+                  checked={autoIncludeProductLibrary}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setAutoIncludeProductLibrary(e.target.checked)
+                  }
+                >
+                  {t("backup.includeProductLibrary")}
+                </Checkbox>
               </div>
             </div>
             <div className={styles.autoStatus}>
@@ -810,6 +825,13 @@ export default function BackupRestorePanel() {
             onChange={(e) => setIncludeChats(e.target.checked)}
           >
             {t("backup.includeChats")}
+          </Checkbox>
+          <Checkbox
+            checked={includeProductLibrary}
+            disabled={creating}
+            onChange={(e) => setIncludeProductLibrary(e.target.checked)}
+          >
+            {t("backup.includeProductLibrary")}
           </Checkbox>
           <span className={styles.optionHint}>
             {t("backup.includeChatsHint")}

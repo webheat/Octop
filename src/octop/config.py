@@ -103,6 +103,7 @@ class BackupConfig:
     include_plugins: bool = True
     include_knowledge: bool = True
     include_chats: bool = False
+    include_product_library: bool = True
 
 
 _VALID_MOBILE_BACKENDS = frozenset({"physical", "redroid", "emulator", "none"})
@@ -244,6 +245,9 @@ def _parse_backup_section(raw: object) -> BackupConfig:
         include_plugins=bool(raw.get("include_plugins", defaults.include_plugins)),
         include_knowledge=bool(raw.get("include_knowledge", defaults.include_knowledge)),
         include_chats=bool(raw.get("include_chats", defaults.include_chats)),
+        include_product_library=bool(
+            raw.get("include_product_library", defaults.include_product_library)
+        ),
     )
 
 
@@ -740,6 +744,13 @@ def load_config(path: Path) -> OctopConfig:
         backup = replace(
             backup,
             include_chats=_coerce_bool("OCTOP_BACKUP_INCLUDE_CHATS", v, backup.include_chats),
+        )
+    if v := os.environ.get("OCTOP_BACKUP_INCLUDE_PRODUCT_LIBRARY"):
+        backup = replace(
+            backup,
+            include_product_library=_coerce_bool(
+                "OCTOP_BACKUP_INCLUDE_PRODUCT_LIBRARY", v, backup.include_product_library
+            ),
         )
 
     return OctopConfig(

@@ -2673,6 +2673,7 @@
     "includePlugins": "已安装插件（plugins）",
     "includeKnowledge": "知识库文件（knowledge）",
     "includeChats": "聊天记录（含运行轨迹）",
+    "includeProductLibrary": "商品库媒体文件（product-library）",
     "includeChatsHint": "聊天记录和运行轨迹可能占用大量空间，默认不备份。",
     "creating": "备份中…",
     "uploadButton": "上传备份",
