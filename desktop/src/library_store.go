@@ -42,13 +42,26 @@ type localAsset struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Usage       string   `json:"usage,omitempty"`
+	ProductID   string   `json:"productId,omitempty"`
 	StoredName  string   `json:"storedName"`
 	CreatedAt   int64    `json:"createdAt"`
 }
 
+// localProduct is a product archived into the on-machine library. It is the
+// local counterpart of the hosted product_library_products row.
+type localProduct struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Model         string   `json:"model,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	SellingPoints []string `json:"sellingPoints,omitempty"`
+	CreatedAt     int64    `json:"createdAt"`
+}
+
 type localLibraryIndex struct {
-	Version int          `json:"version"`
-	Assets  []localAsset `json:"assets"`
+	Version  int            `json:"version"`
+	Assets   []localAsset   `json:"assets"`
+	Products []localProduct `json:"products,omitempty"`
 }
 
 // localLibraryStore owns one owner's library under a stable root. All public
@@ -83,7 +96,11 @@ func (s *localLibraryStore) indexPath() string {
 }
 
 func (s *localLibraryStore) loadLocked() (localLibraryIndex, error) {
-	idx := localLibraryIndex{Version: localLibraryVersion, Assets: []localAsset{}}
+	idx := localLibraryIndex{
+		Version: localLibraryVersion,
+		Assets:  []localAsset{},
+		Products: []localProduct{},
+	}
 	data, err := os.ReadFile(s.indexPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return idx, nil
@@ -96,6 +113,9 @@ func (s *localLibraryStore) loadLocked() (localLibraryIndex, error) {
 	}
 	if idx.Assets == nil {
 		idx.Assets = []localAsset{}
+	}
+	if idx.Products == nil {
+		idx.Products = []localProduct{}
 	}
 	return idx, nil
 }
@@ -177,6 +197,7 @@ func (s *localLibraryStore) Add(filename, mediaType string, data []byte, meta ma
 			asset.Filename = existing.Filename
 			asset.StoredName = existing.StoredName
 			asset.CreatedAt = existing.CreatedAt
+			asset.ProductID = existing.ProductID
 			if asset.Group == "" {
 				asset.Group = existing.Group
 			}
@@ -244,6 +265,136 @@ func (s *localLibraryStore) List() ([]localAsset, error) {
 	}
 	out := make([]localAsset, len(idx.Assets))
 	copy(out, idx.Assets)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out, nil
+}
+
+// localArchiveGroup is one reviewed group from the AI plan. Empty ProductID
+// means "create a new product from Name"; a non-empty ProductID reuses an
+// existing owned product.
+type localArchiveGroup struct {
+	ProductID     string   `json:"productId"`
+	Name          string   `json:"name"`
+	Model         string   `json:"model"`
+	Category      string   `json:"category"`
+	SellingPoints []string `json:"sellingPoints"`
+	ItemIDs       []string `json:"itemIds"`
+}
+
+// ArchiveGroups commits a reviewed grouping plan into local products and files
+// each asset under its product. It is idempotent: reusing a ProductID keeps the
+// product; re-archiving an asset just moves its ProductID. Missing asset ids
+// are reported, not fatal. Product ids are locally minted (P + 12-hex of a
+// SHA-256 over name+timestamp+random-free counter derived from existing ids).
+func (s *localLibraryStore) ArchiveGroups(groups []localArchiveGroup) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, err := s.loadLocked()
+	if err != nil {
+		return nil, err
+	}
+	assetByID := make(map[string]int, len(idx.Assets))
+	for i := range idx.Assets {
+		assetByID[idx.Assets[i].ID] = i
+	}
+	productByID := make(map[string]int, len(idx.Products))
+	for i := range idx.Products {
+		productByID[idx.Products[i].ID] = i
+	}
+	created, reused, filed := 0, 0, 0
+	missing := []string{}
+	for _, group := range groups {
+		productID := strings.TrimSpace(group.ProductID)
+		if productID != "" {
+			if _, ok := productByID[productID]; !ok {
+				return nil, errLibraryNotFound
+			}
+			reused++
+		} else {
+			name := strings.TrimSpace(group.Name)
+			if name == "" {
+				continue
+			}
+			productID = newLocalProductID(name, len(idx.Products), time.Now().UnixNano())
+			idx.Products = append(idx.Products, localProduct{
+				ID: productID, Name: name[:min(len(name), 200)],
+				Model: group.Model, Category: group.Category,
+				SellingPoints: group.SellingPoints, CreatedAt: time.Now().Unix(),
+			})
+			productByID[productID] = len(idx.Products) - 1
+			created++
+		}
+		for _, aid := range group.ItemIDs {
+			pos, ok := assetByID[aid]
+			if !ok {
+				missing = append(missing, aid)
+				continue
+			}
+			idx.Assets[pos].ProductID = productID
+			idx.Assets[pos].Usage = "scene"
+			filed++
+		}
+	}
+	if err := s.saveLocked(idx); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"createdProducts": created,
+		"reusedProducts":  reused,
+		"filedAssets":     filed,
+		"missingAssets":   missing,
+	}, nil
+}
+
+func newLocalProductID(name string, salt int, ts int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", name, salt, ts)))
+	return "P" + hex.EncodeToString(sum[:12])
+}
+
+// ListProducts returns all local products with their asset counts.
+func (s *localLibraryStore) ListProducts() ([]map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, err := s.loadLocked()
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(idx.Products))
+	for _, asset := range idx.Assets {
+		if asset.ProductID != "" {
+			counts[asset.ProductID]++
+		}
+	}
+	out := make([]map[string]any, 0, len(idx.Products))
+	for _, p := range idx.Products {
+		out = append(out, map[string]any{
+			"id": p.ID, "name": p.Name, "model": p.Model, "category": p.Category,
+			"sellingPoints": p.SellingPoints, "assetCount": counts[p.ID],
+			"createdAt": p.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ti, _ := out[i]["createdAt"].(int64)
+		tj, _ := out[j]["createdAt"].(int64)
+		return ti < tj
+	})
+	return out, nil
+}
+
+// ProductAssets returns the assets filed under a product.
+func (s *localLibraryStore) ProductAssets(productID string) ([]localAsset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, err := s.loadLocked()
+	if err != nil {
+		return nil, err
+	}
+	out := []localAsset{}
+	for _, asset := range idx.Assets {
+		if asset.ProductID == productID {
+			out = append(out, asset)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
 	return out, nil
 }

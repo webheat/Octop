@@ -21,7 +21,36 @@ export interface LocalAsset {
   tags?: string[];
   usage?: string;
   localPath?: string;
+  productId?: string;
   createdAt?: number;
+}
+
+export interface LocalProduct {
+  id: string;
+  name: string;
+  model?: string;
+  category?: string;
+  sellingPoints?: string[];
+  assetCount: number;
+  createdAt?: number;
+}
+
+export interface LocalPlanGroup {
+  id?: string;
+  filename: string;
+  group?: string;
+  category?: string;
+  description?: string;
+  tags?: string[];
+  confidence?: number;
+  group_source?: string;
+}
+
+export interface LocalPlanGroupResult {
+  key: string;
+  suggested_name: string;
+  category: string;
+  items: LocalPlanGroup[];
 }
 
 export interface PickedPath {
@@ -98,6 +127,38 @@ export const localLibrary = {
     return Boolean(res?.ok);
   },
 
+  /** List local products with their filed asset counts. */
+  async listProducts(): Promise<LocalProduct[]> {
+    return call<LocalProduct[]>("listProducts");
+  },
+
+  /** Assets filed under a local product. */
+  async productAssets(productId: string): Promise<LocalAsset[]> {
+    return call<LocalAsset[]>("productAssets", { id: productId });
+  },
+
+  /**
+   * Commit a reviewed grouping plan into local products. A group with an
+   * existing productId reuses it; otherwise a new local product is created.
+   */
+  async archiveGroups(
+    groups: Array<{
+      productId?: string;
+      name: string;
+      model?: string;
+      category?: string;
+      sellingPoints?: string[];
+      itemIds: string[];
+    }>,
+  ): Promise<{
+    createdProducts: number;
+    reusedProducts: number;
+    filedAssets: number;
+    missingAssets: string[];
+  }> {
+    return call("archiveGroups", { body: { groups } });
+  },
+
   async jobStatus(id: string): Promise<{
     id: string;
     state: string;
@@ -158,6 +219,33 @@ export interface LocalPlanResult {
   };
   assets: Array<{ id: string; export_name: string; media_type: string }>;
   generator: string;
+}
+
+/**
+ * Group already-recognised local asset metadata into a review plan. Pure
+ * server-side computation (no model, no storage, no material bytes) — the
+ * grouping key matches the hosted directory-import wizard.
+ */
+export function groupPlan(input: {
+  items: Array<{
+    id: string;
+    filename?: string;
+    group?: string;
+    category?: string;
+    description?: string;
+    tags?: string[];
+    confidence?: number;
+    group_source?: string;
+  }>;
+}): Promise<{
+  groups: LocalPlanGroupResult[];
+  skipped: number;
+  total: number;
+}> {
+  return request("/product-library/group-plan", {
+    method: "POST",
+    body: JSON.stringify({ items: input.items }),
+  });
 }
 
 /** Stateless template plan for local material — no server-side material needed. */

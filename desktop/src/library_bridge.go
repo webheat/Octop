@@ -154,6 +154,25 @@ func (a *App) libraryAction(action, token string, payload map[string]json.RawMes
 		}
 		return store.UpdateMeta(body.ID, body.Meta)
 
+	case "archiveGroups":
+		var body struct {
+			Groups []localArchiveGroup `json:"groups"`
+		}
+		if json.Unmarshal(payload["body"], &body) != nil || len(body.Groups) == 0 {
+			return nil, errLibraryInvalid
+		}
+		return store.ArchiveGroups(body.Groups)
+
+	case "listProducts":
+		return store.ListProducts()
+
+	case "productAssets":
+		pid := stringPayload(payload, "id")
+		if pid == "" {
+			return nil, errLibraryInvalid
+		}
+		return store.ProductAssets(pid)
+
 	case "remove":
 		id := stringPayload(payload, "id")
 		if id == "" {

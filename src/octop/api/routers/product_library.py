@@ -28,7 +28,11 @@ from octop.infra.product_library.narration import (
     resolve_voice_preset,
 )
 from octop.infra.product_library.package_export import export_project_package
-from octop.infra.product_library.recognition import plan_local_video, recognise_uploads
+from octop.infra.product_library.recognition import (
+    group_local_plan,
+    plan_local_video,
+    recognise_uploads,
+)
 from octop.infra.product_library.service import (
     ProductLibraryService,
     project_payload,
@@ -695,6 +699,34 @@ async def plan_local(body: LocalPlanBody, user: Any = Depends(current_user)) -> 
         "assets": [a.model_dump() for a in body.assets],
     }
     return plan_local_video(snapshot, body.request)
+
+
+class LocalGroupItem(BaseModel):
+    id: str = Field(min_length=1, max_length=128)
+    filename: str = Field(default="", max_length=300)
+    group: str = Field(default="", max_length=200)
+    category: str = Field(default="", max_length=100)
+    description: str = Field(default="", max_length=4000)
+    tags: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    group_source: str = Field(default="vision", max_length=32)
+
+
+@router.post(
+    "/product-library/group-plan",
+    summary="Group client-held recognition metadata (no storage, no model)",
+    description=(
+        "Pure grouping over asset metadata the client already holds. Reuses the "
+        "hosted directory-import grouping key so review plans are identical, but "
+        "spends no model call, reads/writes no files and creates no database rows."
+    ),
+)
+async def group_plan(
+    items: list[LocalGroupItem], user: Any = Depends(current_user)
+) -> dict[str, Any]:
+    if len(items) > 2000:
+        raise HTTPException(status_code=400, detail="too many items")
+    return group_local_plan([item.model_dump() for item in items])
 
 
 @router.post(

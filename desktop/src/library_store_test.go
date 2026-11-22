@@ -83,3 +83,59 @@ func TestSafeAssetName(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalLibraryArchiveGroups(t *testing.T) {
+	parent := t.TempDir()
+	store, err := newLocalLibraryStore("https://ocbot.aixifs.com/videogen", "1", parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1, _ := store.Add("a.jpg", "image/jpeg", []byte("alpha-pic"), map[string]any{"group": "登山包", "category": "箱包"})
+	a2, _ := store.Add("b.jpg", "image/jpeg", []byte("beta-pic"), map[string]any{"group": "登山包", "category": "箱包"})
+	a3, _ := store.Add("c.jpg", "image/jpeg", []byte("gamma-pic"), map[string]any{"group": "跑鞋", "category": "鞋履"})
+
+	result, err := store.ArchiveGroups([]localArchiveGroup{
+		{
+			Name: "登山包", Category: "箱包", SellingPoints: []string{"耐用"},
+			ItemIDs: []string{a1.ID, a2.ID},
+		},
+		{Name: "跑鞋", Category: "鞋履", ItemIDs: []string{a3.ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["createdProducts"] != 2 || result["filedAssets"] != 3 {
+		t.Fatalf("unexpected archive result: %#v", result)
+	}
+	products, _ := store.ListProducts()
+	if len(products) != 2 {
+		t.Fatalf("want 2 products, got %d", len(products))
+	}
+	bagID := ""
+	for _, p := range products {
+		if p["name"] == "登山包" {
+			bagID = p["id"].(string)
+		}
+	}
+	if bagID == "" {
+		t.Fatal("登山包 product not found")
+	}
+	bagAssets, _ := store.ProductAssets(bagID)
+	if len(bagAssets) != 2 {
+		t.Fatalf("want 2 assets in 登山包, got %d", len(bagAssets))
+	}
+	// Re-importing an archived asset must keep its product ownership.
+	re, _ := store.Add("a.jpg", "image/jpeg", []byte("alpha-pic"), nil)
+	if re.ProductID != bagID {
+		t.Fatalf("re-add lost product id: %q != %q", re.ProductID, bagID)
+	}
+	// Reuse an existing product for a new group.
+	_, err = store.ArchiveGroups([]localArchiveGroup{{ProductID: bagID, ItemIDs: []string{}}})
+	if err != nil {
+		t.Fatalf("reuse existing product failed: %v", err)
+	}
+	products, _ = store.ListProducts()
+	if len(products) != 2 {
+		t.Fatalf("reuse should not create a product, got %d", len(products))
+	}
+}

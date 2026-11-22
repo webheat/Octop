@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
+import unicodedata
 from typing import Any
 
 from octop.infra.product_library.video_planner import VideoPlanRequest, build_video_plan
@@ -170,3 +172,57 @@ async def recognise_uploads(
                 item["error"] = rep["error"]
 
     return {"items": items, "model": model_ref, "mode": mode}
+
+
+def _norm(text: str) -> str:
+    """NFKC + lowercase + drop all whitespace — mirrors batch_import.group_key."""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text).lower())
+
+
+def _local_group_key(group: str, category: str) -> str:
+    return f"{_norm(category)}::{_norm(group)}"
+
+
+def group_local_plan(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Group client-held, already-recognised assets into a review plan.
+
+    Pure function: no model call, no disk/database write, no asset bytes. The
+    client sends the asset metadata it already holds (id/group/category/
+    description/tags) and gets back the same ``groups`` shape the hosted
+    directory-import wizard reviews, so the local-first UI can reuse it
+    verbatim before archiving into its own product store.
+    """
+    grouped: dict[str, dict[str, Any]] = {}
+    skipped = 0
+    for item in items:
+        group = str(item.get("group") or "")
+        category = str(item.get("category") or "")
+        if is_placeholder_group(group):
+            group = ""
+        if not group and not category:
+            skipped += 1
+            continue
+        key = _local_group_key(group, category)
+        bucket = grouped.setdefault(
+            key,
+            {
+                "key": key,
+                "suggested_name": group or category or "",
+                "category": category[:100],
+                "items": [],
+            },
+        )
+        bucket["items"].append(
+            {
+                "id": str(item.get("id") or ""),
+                "filename": str(item.get("filename") or ""),
+                "group": group,
+                "category": category,
+                "description": str(item.get("description") or ""),
+                "tags": item.get("tags") or [],
+                "confidence": float(item.get("confidence") or 0.0),
+                "group_source": str(item.get("group_source") or "vision"),
+            }
+        )
+    groups = sorted(grouped.values(), key=lambda g: (-len(g["items"]), g["key"]))
+    return {"groups": groups, "skipped": skipped, "total": len(items)}

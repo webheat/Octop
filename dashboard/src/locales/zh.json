@@ -8466,6 +8466,21 @@
     "state.rendering": "渲染中",
     "state.starting": "启动中",
     "state.completed": "已完成",
-    "state.failed": "失败"
+    "state.failed": "失败",
+    "reviewTitle": "AI 分组归档",
+    "reviewEmpty": "导入并识别后，这里会显示 AI 分组结果供你复核归档",
+    "reviewHint": "核对分组名称、可排除不想归档的图片，或复用已有产品；确认后素材与分类会归档到本机产品库。",
+    "grouping": "正在按识别结果分组…",
+    "groupFailed": "AI 分组失败，请重试",
+    "groupCardTitle": "{{count}} 张图片",
+    "groupName": "产品名",
+    "reuseProduct": "复用产品",
+    "createNew": "新建产品",
+    "archive": "确认归档到本机产品库",
+    "archiveEmpty": "没有可归档的分组，请先勾选要归档的图片",
+    "archived": "已归档：{{products}} 个产品、{{assets}} 个素材",
+    "archiveFailed": "归档失败，请重试",
+    "products": "本机产品（{{count}}）",
+    "inbox": "未归档（{{count}}）"
   }
 }

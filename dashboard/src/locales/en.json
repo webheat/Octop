@@ -8466,6 +8466,21 @@
     "state.rendering": "Rendering",
     "state.starting": "Starting",
     "state.completed": "Completed",
-    "state.failed": "Failed"
+    "state.failed": "Failed",
+    "reviewTitle": "AI grouping & archive",
+    "reviewEmpty": "After import and recognition, the AI grouping plan appears here for review",
+    "reviewHint": "Check the product name, exclude images you don't want, or reuse an existing product. Confirming archives the material and its classification into your local product library.",
+    "grouping": "Grouping by recognition results…",
+    "groupFailed": "AI grouping failed, please retry",
+    "groupCardTitle": "{{count}} images",
+    "groupName": "Product name",
+    "reuseProduct": "Reuse product",
+    "createNew": "Create new product",
+    "archive": "Archive to local product library",
+    "archiveEmpty": "No groups to archive — select images to archive first",
+    "archived": "Archived: {{products}} product(s), {{assets}} item(s)",
+    "archiveFailed": "Archive failed, please retry",
+    "products": "Local products ({{count}})",
+    "inbox": "Unarchived ({{count}})"
   }
 }

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from octop.infra.product_library import recognition
-from octop.infra.product_library.recognition import recognise_uploads
+from octop.infra.product_library.recognition import group_local_plan, recognise_uploads
 
 
 def _model(payload: str) -> Any:
@@ -143,3 +143,51 @@ def test_plan_local_video_is_stateless_and_maps_assets() -> None:
     # export_name uses the local asset id so the client can map it back.
     assert result["assets"][0]["export_name"].startswith("Labc123-")
     assert result["generator"] == "template-v1"
+
+
+def test_group_local_plan_groups_by_normalised_key() -> None:
+    items = [
+        {
+            "id": "L1",
+            "filename": "a.jpg",
+            "group": "登 山 包",
+            "category": "箱包",
+            "description": "front view",
+            "tags": ["bag"],
+        },
+        {
+            "id": "L2",
+            "filename": "b.jpg",
+            "group": "登山包",
+            "category": "箱包",
+            "description": "side view",
+            "tags": [],
+        },
+        {
+            "id": "L3",
+            "filename": "c.jpg",
+            "group": "",
+            "category": "",
+            "description": "no classification",
+        },
+    ]
+    plan = group_local_plan(items)
+    assert plan["total"] == 3
+    assert plan["skipped"] == 1
+    assert len(plan["groups"]) == 1
+    group = plan["groups"][0]
+    assert group["suggested_name"] == "登 山 包"
+    assert group["category"] == "箱包"
+    assert {i["id"] for i in group["items"]} == {"L1", "L2"}
+
+
+def test_group_local_plan_uses_category_when_group_placeholder() -> None:
+    items = [
+        {"id": "L1", "group": "unknown", "category": "鞋履", "description": ""},
+        {"id": "L2", "group": "unknown", "category": "鞋履", "description": ""},
+    ]
+    plan = group_local_plan(items)
+    assert plan["skipped"] == 0
+    assert len(plan["groups"]) == 1
+    assert plan["groups"][0]["suggested_name"] == "鞋履"
+    assert len(plan["groups"][0]["items"]) == 2
