@@ -119,6 +119,7 @@
 | [cluster_CN.md](./cluster_CN.md) | 多副本 / Helm 部署（中文） |
 | [cnb-mirror.md](./cnb-mirror.md) | CNB 镜像链路（GitHub → CNB） |
 | [cnb-openapi.md](./cnb-openapi.md) | CNB Open API 调用方法与踩坑 |
+| [cnb-branch-analysis.md](./cnb-branch-analysis.md) | CNB 分支情况每日分析机制（每日 01:30 自动出带日期的快照，活文档） |
 | [gitee-release.md](./gitee-release.md) | Gitee 发布通道 |
 | [memory-slim.md](./memory-slim.md) | 手动在线整理 `memory.sqlite` |
 | [superagent-remote.md](./superagent-remote.md) | superagent（dsh-superagent）远程 systemd 部署 |

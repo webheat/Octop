@@ -161,6 +161,11 @@ artifacts = [
     "src/octop/dashboard/**/*",
 ]
 
+[tool.uv]
+# 内网 PyPI 源（192.168.20.173:4874）已下线，改用腾讯云公网镜像。
+# 与 /root/.pip/pip.conf 保持一致；uv.lock 里的 registry 由 `uv lock` 重新钉住。
+index-url = "https://mirrors.tencentyun.com/pypi/simple"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

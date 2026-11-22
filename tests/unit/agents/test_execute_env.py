@@ -165,3 +165,41 @@ def test_inject_docker_only_sets_platform_defaults(tmp_path: Path, monkeypatch) 
     assert env["OCTOP_AUTH_DIR"] == str(ws / ".octop" / "auth")
     assert spec["environment"]["OCTOP_TCCLI_PROFILE"] == "octop-1"
     assert "GLOBAL_KEY" not in env
+
+
+def test_inject_creates_legacy_workspace_skills_root(tmp_path: Path, monkeypatch) -> None:
+    """The harness reads the legacy workspace-root ``skills/`` next to ``.octop/skills``.
+
+    Without the directory the skills middleware logs "path_not_found" on every
+    agent start.
+    """
+    monkeypatch.setenv("OCTOP_HOME", str(tmp_path))
+    paths = PathLayout(tmp_path)
+    paths.ensure_root()
+    ws = paths.ensure_agent_workspace("agent-skills")
+
+    inject_agent_execute_env(
+        {"type": "local_shell", "root_dir": "/", "virtual_mode": True},
+        paths=paths,
+        row=_row("agent-skills"),
+        workspace_dir=ws,
+        cfg={"system_files_path": ".octop"},
+    )
+    assert (ws / ".octop" / "skills").is_dir()
+    assert (ws / "skills").is_dir()
+
+
+def test_inject_legacy_layout_reuses_workspace_skills_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OCTOP_HOME", str(tmp_path))
+    paths = PathLayout(tmp_path)
+    paths.ensure_root()
+    ws = paths.ensure_agent_workspace("agent-legacy-skills")
+
+    inject_agent_execute_env(
+        {"type": "local_shell", "root_dir": "/", "virtual_mode": True},
+        paths=paths,
+        row=_row("agent-legacy-skills"),
+        workspace_dir=ws,
+        cfg={},
+    )
+    assert (ws / "skills").is_dir()

@@ -76,19 +76,23 @@ slim 首启下载运行时，采用**分层 + 多分片 + 多节点**策略：
 | `deps-boto` | ~14 MB | ❌ | 可选 |
 | `deps-lark` | ~2.6 MB | ❌ | 可选 |
 
-> 路径：`runtime-shards/1.4.0/windows-amd64/`；manifest 内每 part 有 3 个 URL。
+> 路径：`runtime-shards/1.4.0/windows-amd64/`；manifest 内每 part 有 2 个 URL。
 
-### 2.3 URL 三档兜底（照搬视频组件）
+### 2.3 URL 两档兜底（只认域名 dw.mengxa.com）
 
 客户端对多个 URL 逐个尝试，第一个返回 200 且 SHA256 校验通过即采用，失败自动切下一个：
 
 ```
 https://dw.mengxa.com/...   （主，HTTPS 域名）
 http://dw.mengxa.com/...    （兜底）
-http://175.178.192.87/...   （末兜底，IP 直连）
 ```
 
-**容错能力**：任意两个节点失效时，客户端自动从仍有效的源下载。该行为由
+> 2026-11-20 起 manifest 不再写 IP 直连地址（原第三档 `http://175.178.192.87/...` 已删除），
+> 全部 URL 统一用 `dw.mengxa.com` 域名。前提是 DNS 里每个节点在 HTTP 上都真的出文件：
+> 1.14.182.208 原先 80 端口整站 301，客户端用 IP 直连时 Host 匹配不到站点、落到 default
+> server → 404；现已改为 80 端口直接提供 `/video-components/`、`/runtime-shards/` 文件。
+
+**容错能力**：任意一个 scheme 失效时，客户端自动从仍有效的源下载。该行为由
 `bootstrap_test.go` 中「坏源自动切好源」的用例保护。
 
 ### 2.4 节点现状（dw.mengxa.com）
@@ -96,9 +100,9 @@ http://175.178.192.87/...   （末兜底，IP 直连）
 | 节点 | HTTPS | HTTP | 分片文件 | 角色 |
 |---|---|---|---|---|
 | 175.178.192.87 | ❌ | ✅ | ✅ | HTTP 兜底源 |
-| 1.14.182.208 | ✅ | 301→HTTPS | ✅ | HTTPS 主源 |
+| 1.14.182.208 | ✅ | ✅ 2026-11-20 起直接出文件 | ✅ | HTTPS 主源 + HTTP 兜底 |
 | 175.178.33.107 | ✅ | 301→HTTPS | ✅ | HTTPS 主源 |
-| 8.134.147.195 | ❌ | ❌ | ❌ | 不服务 dw（跳过） |
+| 8.134.147.195 | ❌ | ❌ 403 | ❌ | 不服务 dw —— 必须从 DNS A 记录移除 |
 
 > DNS 轮询 4 个 IP，SSH 端口 13122。已给两台 HTTPS 节点加 `/runtime-shards/` location 放行；
 > `https://dw.mengxa.com/...manifest.json` 经 DNS 轮询返回 200，Range 续传返回 206。

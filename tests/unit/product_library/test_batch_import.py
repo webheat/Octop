@@ -609,3 +609,164 @@ def test_categorise_prompt_is_unchanged_without_a_folder_hint() -> None:
     with_hint = _categorise_prompt("登山包")
     assert with_hint.startswith(CATEGORISE_PROMPT)
     assert '"登山包"' in with_hint
+
+
+# ---------------------------------------------------------------------------
+# placeholder group labels never become product names
+# ---------------------------------------------------------------------------
+
+
+def test_parse_categorisation_payload_drops_placeholder_group() -> None:
+    for label in ["candidates", "Candidates", " candidate ", "未知", "未命名"]:
+        got = parse_categorisation_payload(
+            json.dumps(
+                {
+                    "group": label,
+                    "category": "玉石",
+                    "description": "x",
+                    "tags": [],
+                    "confidence": 0.9,
+                },
+                ensure_ascii=False,
+            )
+        )
+        assert got["group"] == "", label
+
+
+async def test_analyse_placeholder_group_falls_back_to_folder(
+    library: SimpleNamespace,
+) -> None:
+    """A model that answers "candidates" must not name the product that."""
+
+    def fake_categorise(
+        data: bytes, media_type: str, model: Any, folder_hint: str = ""
+    ) -> dict[str, Any]:
+        return {
+            "group": "candidates",
+            "category": "玉石",
+            "description": "翡翠手镯特写",
+            "tags": ["翡翠"],
+            "confidence": 0.9,
+        }
+
+    model_pair = (MagicMock(), "test/vision")
+    files = [("翡翠手镯/01.jpg", "image/jpeg", b"bracelet")]
+    with (
+        patch(
+            "octop.infra.product_library.batch_import.resolve_vision_model",
+            return_value=model_pair,
+        ),
+        patch(
+            "octop.infra.product_library.batch_import.categorise_image",
+            side_effect=fake_categorise,
+        ),
+    ):
+        analysis = await analyse_upload(
+            service=library.service, provider_repo=MagicMock(), owner_id=1, files=files
+        )
+
+    assert analysis["groups"][0]["suggested_name"] == "翡翠手镯"
+    assert analysis["groups"][0]["category"] == "玉石"
+
+
+async def test_commit_placeholder_name_falls_back_to_source_folder(
+    library: SimpleNamespace,
+) -> None:
+    service: ProductLibraryService = library.service
+
+    def fake_categorise(
+        data: bytes, media_type: str, model: Any, folder_hint: str = ""
+    ) -> dict[str, Any]:
+        return {
+            "group": "candidates",
+            "category": "玉石",
+            "description": "翡翠手镯特写",
+            "tags": ["翡翠"],
+            "confidence": 0.9,
+        }
+
+    model_pair = (MagicMock(), "test/vision")
+    files = [("翡翠手镯/01.jpg", "image/jpeg", b"bracelet")]
+    with (
+        patch(
+            "octop.infra.product_library.batch_import.resolve_vision_model",
+            return_value=model_pair,
+        ),
+        patch(
+            "octop.infra.product_library.batch_import.categorise_image",
+            side_effect=fake_categorise,
+        ),
+    ):
+        analysis = await analyse_upload(
+            service=service, provider_repo=MagicMock(), owner_id=1, files=files
+        )
+
+    group = analysis["groups"][0]
+    result = commit_import(
+        service,
+        owner_id=1,
+        job_id=analysis["job_id"],
+        groups=[
+            {
+                "product_id": None,
+                # A stale client sends back the placeholder it was given.
+                "name": "candidates",
+                "category": group["category"],
+                "item_indices": [item["index"] for item in group["items"]],
+            }
+        ],
+        exclude_indices=[],
+    )
+    assert result["created_products"] == 1
+    assert {p["name"] for p in service.list_products(1)} == {"翡翠手镯"}
+
+
+async def test_commit_without_any_usable_name_reports_failure(
+    library: SimpleNamespace,
+) -> None:
+    service: ProductLibraryService = library.service
+
+    def fake_categorise(
+        data: bytes, media_type: str, model: Any, folder_hint: str = ""
+    ) -> dict[str, Any]:
+        return {
+            "group": "candidates",
+            "category": "玉石",
+            "description": "翡翠手镯特写",
+            "tags": ["翡翠"],
+            "confidence": 0.9,
+        }
+
+    model_pair = (MagicMock(), "test/vision")
+    files = [("01.jpg", "image/jpeg", b"bracelet")]
+    with (
+        patch(
+            "octop.infra.product_library.batch_import.resolve_vision_model",
+            return_value=model_pair,
+        ),
+        patch(
+            "octop.infra.product_library.batch_import.categorise_image",
+            side_effect=fake_categorise,
+        ),
+    ):
+        analysis = await analyse_upload(
+            service=service, provider_repo=MagicMock(), owner_id=1, files=files
+        )
+
+    group = analysis["groups"][0]
+    result = commit_import(
+        service,
+        owner_id=1,
+        job_id=analysis["job_id"],
+        groups=[
+            {
+                "product_id": None,
+                "name": "candidates",
+                "category": group["category"],
+                "item_indices": [item["index"] for item in group["items"]],
+            }
+        ],
+        exclude_indices=[],
+    )
+    assert result["created_products"] == 0
+    assert result["failed"] == [{"filename": "(group)", "reason": "missing product name"}]

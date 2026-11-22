@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Octop — self-hosted AI assistant platform (multi-user, multi-agent), shipped as **one Python wheel**: FastAPI backend + React dashboard + Click CLI, glued over three reusable libs (`octop-harness` = LangGraph runtime, `octop-gateway` = IM channel pipeline, `octop-memory`). Single process: no worker, no external queue, no required service beyond an LLM provider.
 
+**Deployment boundary (MUST — read before any build/deploy):** one wheel is the *packaging* shape, not a shared build step. `dashboard/` (frontend source) and `src/octop/` (backend) are two separate deployment units; the only handoff is the gitignored artifact `src/octop/dashboard/`. **The backend environment NEVER builds the frontend** — seeing a `dashboard/` change in a backend context is a NO-OP + report, never `npm`/`vite`/`make build-frontend`. Full if-then rules: `docs/deployment-boundary.md` (authoritative; wins over the "one wheel" wording if the two ever seem to conflict).
+
 ## Commands
 
 `make` is the project's entry point (`Makefile`, `SHELL := /bin/bash`); GNU Make 4.3 is installed on this host and every target wraps `uv run` when `uv` is present. `make test` adds `-n auto` (pytest-xdist) — the bare `uv run pytest` forms below run serially; use the Makefile when you want exact CI behavior.
@@ -43,13 +45,15 @@ uv run ruff check src tests
 uv run ruff format src tests
 uv run mypy src/octop            # --strict, files = src/octop (see pyproject [tool.mypy])
 
-# frontend (dashboard/ — React 18 + TS + Vite)
+# frontend (dashboard/ — React 18 + TS + Vite) — [frontend-env only]
+# NEVER run these in a backend environment or on the production server.
 cd dashboard && npm ci
 cd dashboard && npx tsc -b        # typecheck
 cd dashboard && npm run lint      # eslint
 cd dashboard && npm run format    # prettier write
 cd dashboard && npm test          # vitest
 cd dashboard && npm run build     # → src/octop/dashboard/  (never edit that dir by hand)
+bash scripts/deploy-dashboard.sh  # sync the built artifact → server (after build)
 
 # git hooks (once per clone)
 make install-hooks                 # = git config core.hooksPath .githooks
@@ -92,6 +96,7 @@ Layering and hard bans are defined in `AGENTS.md` §5; the short version — dep
 
 | Path | What it is |
 |---|---|
+| `docs/deployment-boundary.md` | **Frontend/backend deployment boundary** — which env builds, artifact handoff, if-then decision table. Authoritative; read before any build/deploy. |
 | `docs/architecture.md` | Human-readable overview of the process model and runtime tree (AGENTS.md is the agent-facing twin) |
 | `docs/api.md`, `docs/cli.md`, `docs/adr/`, `docs/*.md` | Human API/CLI reference, ADRs, per-feature guides (LDAP, ACP, bridge, connectors, personas, teams) |
 | `plugins/` | Example plugin packages (`demo-toolkit`, `bilibili-anime`, `server-status`, …) — plugin authoring reference |

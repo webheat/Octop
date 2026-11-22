@@ -93,9 +93,42 @@ def _isolated_user_home(
     return home
 
 
+@pytest.fixture(autouse=True)
+def _isolated_octop_home(
+    _isolated_user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Never let a test resolve the real data directory.
+
+    ``PathLayout.from_env()`` prefers ``OCTOP_HOME`` over ``~/.octop``, so an
+    inherited ``OCTOP_HOME`` (e.g. ``/opt/octop-data`` on the deploy host) would
+    point every test at the live data dir. ``octop clean --all`` and
+    ``octop init --force`` tests then delete the real DB, config, agent
+    workspaces — and, in the nightly job, the pytest log being written.
+
+    Drop ``OCTOP_HOME`` (and the external-DB overrides) so the root always
+    resolves through the already-isolated ``HOME``; tests that patch
+    ``HOME`` / ``Path.home`` therefore keep working unchanged.
+    """
+    for key in (
+        "OCTOP_HOME",
+        "OCTOP_BACKUPS_DIR",
+        "OCTOP_DATABASE_URL",
+        "OCTOP_DATABASE_DRIVER",
+        "OCTOP_DATABASE_SQLITE_PATH",
+        "OCTOP_DATABASE_HOST",
+        "OCTOP_DATABASE_PORT",
+        "OCTOP_DATABASE_NAME",
+        "OCTOP_DATABASE_USER",
+        "OCTOP_DATABASE_PASSWORD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    return _isolated_user_home / ".octop"
+
+
 @pytest.fixture
-def tmp_octop_home(_isolated_user_home: Path) -> Iterator[Path]:
+def tmp_octop_home(_isolated_octop_home: Path) -> Iterator[Path]:
     """Redirect ``~/.octop`` under the autouse isolated HOME."""
-    octop = _isolated_user_home / ".octop"
+    octop = _isolated_octop_home
     octop.mkdir(exist_ok=True)
     yield octop
