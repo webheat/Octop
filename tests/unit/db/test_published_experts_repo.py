@@ -11,6 +11,10 @@ from octop.infra.db.migrate import run_migrations
 from octop.infra.db.pool import SqlitePool
 from octop.infra.db.repos.published_experts import PublishedExpertRepo
 
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+# Derived from the migration files so adding one only means adding the file.
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS_DIR.glob("*.sql"))
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> SqlitePool:
@@ -27,7 +31,7 @@ def test_published_experts_table_exists(db: SqlitePool) -> None:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(published_experts)").fetchall()}
     assert "published_experts" in names
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert "published_expert_id" in cols
 
 

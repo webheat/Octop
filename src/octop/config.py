@@ -139,7 +139,6 @@ class OctopConfig:
     default_timezone: str = "Asia/Shanghai"
     enable_dashboard: bool = True
     enable_api_docs: bool = False
-    history_v2_enabled: bool = False
     # Dump every outbound model request/response to <OCTOP_HOME>/logs/llm/.
     # Off by default: the dump holds the user's prompt, the agent's system
     # prompt and every tool schema.
@@ -755,13 +754,6 @@ def load_config(path: Path) -> OctopConfig:
         enable_dashboard=bool(merged["enable_dashboard"]),
         enable_api_docs=bool(merged["enable_api_docs"]),
         llm_debug=bool(merged.get("llm_debug", False)),
-        history_v2_enabled=_coerce_bool(
-            "OCTOP_HISTORY_V2_ENABLED",
-            os.environ.get(
-                "OCTOP_HISTORY_V2_ENABLED", str(merged.get("history_v2_enabled", False))
-            ),
-            False,
-        ),
         require_setup_password=bool(merged["require_setup_password"]),
         database=parse_database_config(merged_db),
         database_in_file=database_in_file,

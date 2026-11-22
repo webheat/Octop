@@ -12,6 +12,10 @@ from octop.infra.db.repos.threads import (
     repair_legacy_thread_title,
 )
 
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+# Derived from the migration files so adding one only means adding the file.
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS_DIR.glob("*.sql"))
+
 
 def test_clip_thread_title_short() -> None:
     assert clip_thread_title("hello") == "hello"
@@ -82,7 +86,7 @@ def test_migration_003_repairs_stored_hard_cuts(tmp_path: Path) -> None:
     with pool.connect() as conn:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         title = conn.execute("SELECT title FROM threads WHERE thread_id = ?", ("t1",)).fetchone()[0]
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert title == "x" * 39 + "…"
     # Idempotent repair
     assert repair_all_legacy_thread_titles(pool) == 0
