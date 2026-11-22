@@ -31,7 +31,8 @@ var navProbeJS string
 // navLogMaxSize caps the log file; on startup a bigger file is rotated once.
 const navLogMaxSize = 4 << 20
 
-// navLogFileName is the log written under <octop home>/logs/.
+// navLogFileName is the log written next to the running executable, so a
+// portable install keeps all diagnostics in its own directory.
 const navLogFileName = "desktop-nav.log"
 
 // navLogger collects what the webview actually navigates to.
@@ -69,7 +70,14 @@ func (n *navLogger) logf(format string, args ...any) {
 }
 
 // path returns the log file location.
+//
+// The log lives next to the running executable (not under the user home) so
+// portable/green installs keep all diagnostics self-contained. Falls back to
+// octopHome() only when the executable path cannot be determined.
 func navLogPath() string {
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		return filepath.Join(filepath.Dir(exe), navLogFileName)
+	}
 	return filepath.Join(octopHome(), "logs", navLogFileName)
 }
 

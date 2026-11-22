@@ -3,9 +3,26 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestNavLogPathIsBesideExecutable(t *testing.T) {
+	got := navLogPath()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	want := filepath.Join(filepath.Dir(exe), navLogFileName)
+	if got != want {
+		t.Fatalf("navLogPath() = %q, want %q (log must live beside the exe, not in user home)", got, want)
+	}
+	if strings.Contains(got, string(os.PathSeparator)+".octop"+string(os.PathSeparator)) {
+		t.Fatalf("navLogPath() = %q must not point into the user home", got)
+	}
+}
 
 func TestRedactURLMasksCredentialParams(t *testing.T) {
 	got := redactURL("https://ocbot.aixifs.com/login?token=abcdef123456&next=%2Fchat")
