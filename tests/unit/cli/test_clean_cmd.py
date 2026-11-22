@@ -13,6 +13,9 @@ from octop.cli.main import cli
 @pytest.fixture
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    # ``PathLayout.from_env()`` prefers OCTOP_HOME over ``~/.octop`` — point it
+    # at the same sandbox, otherwise ``clean --all`` would wipe the real one.
+    monkeypatch.setenv("OCTOP_HOME", str(tmp_path / ".octop"))
     return tmp_path
 
 

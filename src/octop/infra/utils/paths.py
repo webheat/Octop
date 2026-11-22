@@ -128,7 +128,16 @@ class PathLayout:
 
     @property
     def backups_dir(self) -> Path:
-        """Stored system backup archives: ``~/.octop/backups/``."""
+        """Stored system backup archives.
+
+        Defaults to ``~/.octop/backups/``, but that lives *inside* the data root
+        and ``octop clean --all`` wipes the whole root — a backup there dies
+        with the data it was meant to protect. ``OCTOP_BACKUPS_DIR`` moves the
+        store outside the root; the fallback keeps the historical layout.
+        """
+        override = os.environ.get("OCTOP_BACKUPS_DIR", "").strip()
+        if override:
+            return Path(override).expanduser()
         return self.root / "backups"
 
     def ensure_backups_dir(self) -> Path:

@@ -6,13 +6,20 @@
 1. **预检** —— 服务可达、仓库与 venv 就位、pytest 可用。
 2. **跑测试（脚本自己跑，不经 LLM）** —— 在仓库根目录执行全量 pytest，
    后台运行 + 轮询，拿到退出码与完整日志。
+   - 测试跑在**独立的沙箱数据目录**里（``TEST_ISOLATED_HOME``，默认
+     ``/opt/octop-data-test-home``）：全量测试里有 ``octop clean --all`` /
+     ``octop init --force`` 这类会删数据的用例，跑在生产 ``OCTOP_HOME`` 上
+     会把线上 DB、配置、agent 工作区连同正在写的 pytest 日志一起删掉。
    - 跑完了但有失败用例 → 这是**结论**，不是异常：不重试，直接进分析。
-   - 跑不起来（解释器缺失、依赖缺失、收集阶段崩溃、进程被杀）→ 这是**不可跳过的
-     异常**：重试，累计 3 次仍失败就终止。
-3. **结果分析（子代理做）** —— 把日志路径交给一个 Octop 子代理，模型固定为
-   ``qiniu/conatus-free``，让它读日志、归因失败用例、给严重度与下一步建议，
-   产出一份 Markdown 分析报告。分析失败同样按 3 次重试，仍失败则终止。
-4. **出报告** —— 测试结论 + 子代理分析一起落到报告目录，退出码区分
+   - 跑不起来（解释器缺失、依赖缺失、收集阶段崩溃、进程被杀、日志被删）→ 这是
+     **不可跳过的异常**：重试，累计 3 次仍失败就终止。
+3. **结果分析（子代理做）** —— 把日志路径交给一个 Octop 子代理，让它读日志、归因失败
+   用例、给严重度与下一步建议，产出一份 Markdown 分析报告。分析失败按 3 次重试
+   （退避 60s / 120s）。
+4. **模型容灾** —— 主模型（默认 ``qiniu/conatus-free``）重试 3 次仍是 429 限流时，
+   自动切到备用模型（默认 ``MiniMax-M3.1-Flash-Preview``）重跑分析；切换过程、
+   命中 429 的模型、以及服务端日志里的 429 证据行都会记进脚本日志与报告。
+5. **出报告** —— 测试结论 + 子代理分析 + 容灾记录一起落到报告目录，退出码区分
    0=全过 / 1=有失败用例 / 2=不可跳过的异常（重试耗尽）。
 
 只做后端事务：不碰 ``dashboard/``、不构建前端（见 ``docs/deployment-boundary.md``）。
@@ -31,6 +38,7 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,14 +66,32 @@ PROVIDER_NAME = _env("TEST_PROVIDER", "newapi")
 # Octop 侧的模型引用是 "<provider>/<model_id>"，模型 id 本身带斜杠也没关系
 # （解析按第一个斜杠切）。
 MODEL_REF = _env("TEST_MODEL_REF", f"{PROVIDER_NAME}/{MODEL_ID}")
+# 备用模型：主模型连续 3 次撞 429 限流时切过去重试。留空即关闭容灾。
+FALLBACK_MODEL_ID = _env("TEST_FALLBACK_MODEL", "MiniMax-M3.1-Flash-Preview")
+FALLBACK_MODEL_REF = _env(
+    "TEST_FALLBACK_MODEL_REF", f"{PROVIDER_NAME}/{FALLBACK_MODEL_ID}" if FALLBACK_MODEL_ID else ""
+)
+# 服务端日志：用来找"是哪个模型 429"的原始证据行。
+SERVER_LOG = Path(_env("TEST_SERVER_LOG", str(Path(OCTOP_HOME) / "logs" / "octop.log")))
 AGENT_NAME = _env("TEST_AGENT_NAME", "后端全量测试")
 AGENT_USER = _env("TEST_AGENT_USER", "admin")
 MAX_ATTEMPTS = int(_env("TEST_MAX_ATTEMPTS", "3"))
 TEST_TIMEOUT_S = int(_env("TEST_TIMEOUT", "5400"))
 ANALYSIS_TIMEOUT_S = int(_env("TEST_ANALYSIS_TIMEOUT", "1800"))
 POLL_INTERVAL_S = int(_env("TEST_POLL_INTERVAL", "15"))
-TOKEN_TTL_S = int(_env("TEST_TOKEN_TTL", "3600"))
+# 整个流程（pytest 可能跑 1 小时 + 多轮分析重试）都要用这个 token，别让它半路过期。
+TOKEN_TTL_S = int(_env("TEST_TOKEN_TTL", "86400"))
 REPORT_DIR = Path(_env("TEST_REPORT_DIR", str(Path(OCTOP_HOME) / "test-reports")))
+# 测试进程专用的沙箱数据目录：测试必须跑在**独立的** OCTOP_HOME 里。
+# 生产 OCTOP_HOME（/opt/octop-data）里跑全量测试 = 让 `octop clean --all`
+# 这类用例删掉线上 DB、配置、agent 工作区，连正在写的 pytest 日志一起删。
+# 默认放在生产目录**外面**（同级兄弟目录），避免误伤。
+ISOLATED_HOME = Path(
+    _env(
+        "TEST_ISOLATED_HOME",
+        str(Path(OCTOP_HOME).with_name(Path(OCTOP_HOME).name + "-test-home")),
+    )
+)
 PYTEST_ARGS = _env("TEST_PYTEST_ARGS", '-m "not live" -q')
 PYTHON_BIN = _env("TEST_PYTHON", str(REPO_DIR / ".venv" / "bin" / "python"))
 CRON_NAME = _env("TEST_CRON_NAME", "后端全量测试分析")
@@ -213,8 +239,11 @@ def mint_admin_token(ttl_s: int) -> str:
 # ── 准备：模型 / agent / cron ────────────────────────────────────────────────
 
 
-def ensure_provider_model(api: Api) -> None:
+def ensure_provider_models(api: Api, model_ids: list[str]) -> None:
     """把目标模型登记进 provider 的 models_json，否则 harness 看不到它。"""
+    model_ids = [mid for mid in model_ids if mid]
+    if not model_ids:
+        return
     providers = api.get("/api/admin/providers")
     if not isinstance(providers, list) or not providers:
         raise Fatal("GET /api/admin/providers 返回空")
@@ -222,27 +251,31 @@ def ensure_provider_model(api: Api) -> None:
     if target is None:
         raise Fatal(f"找不到名为 {PROVIDER_NAME!r} 的 provider")
     models = target.get("models") or []
-    if any(str(m.get("id")) == MODEL_ID for m in models):
-        log(f"模型 {MODEL_ID} 已在 provider {PROVIDER_NAME!r} 的模型列表里")
+    missing = [mid for mid in model_ids if not any(str(m.get("id")) == mid for m in models)]
+    if not missing:
+        log(f"模型 {', '.join(model_ids)} 已在 provider {PROVIDER_NAME!r} 的模型列表里")
         return
-    log(f"provider {PROVIDER_NAME!r} 里没有 {MODEL_ID}，正在登记")
+    log(f"provider {PROVIDER_NAME!r} 里没有 {', '.join(missing)}，正在登记")
     api.patch(
         f"/api/admin/providers/{target['id']}",
         {
             "models": [
                 *models,
-                {
-                    "id": MODEL_ID,
-                    "name": MODEL_ID,
-                    "enabled": True,
-                    "input": ["text"],
-                    "visibility": "all",
-                    "group_ids": [],
-                },
+                *[
+                    {
+                        "id": mid,
+                        "name": mid,
+                        "enabled": True,
+                        "input": ["text"],
+                        "visibility": "all",
+                        "group_ids": [],
+                    }
+                    for mid in missing
+                ],
             ]
         },
     )
-    log(f"已登记 {MODEL_ID}（引用形式 {MODEL_REF}）")
+    log(f"已登记 {', '.join(missing)}")
 
 
 def ensure_agent(api: Api) -> str:
@@ -361,6 +394,33 @@ def _extract_summary(text: str) -> str:
     return text.strip().splitlines()[-1][:300] if text.strip() else ""
 
 
+def pytest_env() -> dict[str, str]:
+    """pytest 子进程的环境：**沙箱化**的 OCTOP_HOME / HOME。
+
+    测试必须跑在自己的数据目录里。生产 OCTOP_HOME（/opt/octop-data）里跑全量
+    测试会让 `octop clean --all` / `octop init --force` 这类用例删掉线上 DB、
+    配置、agent 工作区，连正在写的 pytest 日志都会被删掉 —— 那样得到的
+    "有失败用例" 结论和子代理分析都是假的。
+    """
+    env = dict(os.environ)
+    env["OCTOP_HOME"] = str(ISOLATED_HOME)
+    env["HOME"] = str(ISOLATED_HOME / "home")
+    env["USERPROFILE"] = env["HOME"]
+    # 别让外部数据库配置把测试拽到真实 PG 上。
+    for key in (
+        "OCTOP_DATABASE_URL",
+        "OCTOP_DATABASE_DRIVER",
+        "OCTOP_DATABASE_SQLITE_PATH",
+        "OCTOP_DATABASE_HOST",
+        "OCTOP_DATABASE_PORT",
+        "OCTOP_DATABASE_NAME",
+        "OCTOP_DATABASE_USER",
+        "OCTOP_DATABASE_PASSWORD",
+    ):
+        env.pop(key, None)
+    return env
+
+
 def run_pytest(attempt: int) -> TestRun:
     """在仓库根目录跑全量 pytest；后台运行 + 轮询，捕获退出码与完整日志。"""
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -370,7 +430,14 @@ def run_pytest(attempt: int) -> TestRun:
     cmd = [PYTHON_BIN, "-m", "pytest", *args]
     run = TestRun(attempt=attempt, log_path=log_path)
 
+    # 沙箱数据目录：每次跑之前清空，保证测试看到的是干净状态。
+    if ISOLATED_HOME.exists():
+        shutil.rmtree(ISOLATED_HOME, ignore_errors=True)
+    ISOLATED_HOME.mkdir(parents=True, exist_ok=True)
+    (ISOLATED_HOME / "home").mkdir(parents=True, exist_ok=True)
+
     log(f"第 {attempt} 次：{' '.join(cmd)}  （cwd={REPO_DIR}）")
+    log(f"测试沙箱：OCTOP_HOME={ISOLATED_HOME}（生产目录 {OCTOP_HOME} 不受影响）")
     started = time.time()
     with log_path.open("wb") as fh:
         proc = subprocess.Popen(  # noqa: S603 — 参数全部来自本脚本配置
@@ -379,6 +446,7 @@ def run_pytest(attempt: int) -> TestRun:
             stdout=fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=pytest_env(),
         )
     run.log_path = log_path
     try:
@@ -398,14 +466,12 @@ def run_pytest(attempt: int) -> TestRun:
 
     text = _tail_summary(log_path)
     run.summary = _extract_summary(text)
-
-    if run.timed_out:
-        run.exception = f"超过 {TEST_TIMEOUT_S}s 未结束，进程被终止"
-    elif run.exit_code is None:
-        run.exception = "pytest 进程没有返回退出码"
-    elif run.exit_code not in (0, 1) and "error" in text.lower() and "no tests ran" in text.lower():
-        # 收集阶段就崩了：不是测试失败，是跑不起来
-        run.exception = f"pytest 异常退出（退出码 {run.exit_code}），疑似收集阶段崩溃"
+    run.exception = classify_run(
+        log_path=log_path,
+        exit_code=run.exit_code,
+        text=text,
+        timed_out=run.timed_out,
+    )
 
     log(
         f"第 {attempt} 次结束：退出码={run.exit_code} 用时={run.duration_s:.0f}s "
@@ -414,6 +480,34 @@ def run_pytest(attempt: int) -> TestRun:
     if run.exception:
         log(f"第 {attempt} 次判定为不可跳过的异常：{run.exception}")
     return run
+
+
+def classify_run(
+    *,
+    log_path: Path,
+    exit_code: int | None,
+    text: str,
+    timed_out: bool,
+) -> str:
+    """跑完之后判断这是「结论」还是「异常」。返回异常描述，空串 = 正常跑完。
+
+    退出码 1（有失败用例）是**结论**，不重试；日志不见了 / 是空的 / 收集阶段崩溃
+    是**异常**，因为没有证据可分析。
+    """
+    if timed_out:
+        return f"超过 {TEST_TIMEOUT_S}s 未结束，进程被终止"
+    if exit_code is None:
+        return "pytest 进程没有返回退出码"
+    if not log_path.exists():
+        # 日志文件被人删了 —— 典型是测试把数据目录整个清了。退出码再准也没用，
+        # 因为没有证据可分析；这是**异常**，不是结论。
+        return f"pytest 日志 {log_path} 在运行后消失（数据目录被清空？）"
+    if log_path.stat().st_size == 0:
+        return f"pytest 日志 {log_path} 是空的（输出被重定向丢了？）"
+    if exit_code not in (0, 1) and "error" in text.lower() and "no tests ran" in text.lower():
+        # 收集阶段就崩了：不是测试失败，是跑不起来
+        return f"pytest 异常退出（退出码 {exit_code}），疑似收集阶段崩溃"
+    return ""
 
 
 def _kill_group(proc: subprocess.Popen[bytes]) -> None:
@@ -438,6 +532,7 @@ class Analysis:
     job_status: str | None = None
     job_error: str | None = None
     detail: str = ""
+    model_ref: str = MODEL_REF
 
 
 def run_analysis(
@@ -446,8 +541,10 @@ def run_analysis(
     cron_id: str,
     run: TestRun,
     attempt: int,
+    model_ref: str = MODEL_REF,
+    log_offset: int = 0,
 ) -> Analysis:
-    """让子代理（模型 qiniu/conatus-free）读日志并产出分析报告。"""
+    """让子代理（默认模型 qiniu/conatus-free）读日志并产出分析报告。"""
     workdir = agent_workdir(agent_id)
     workdir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -462,13 +559,16 @@ def run_analysis(
     )
     if len(prompt) > 1900:
         prompt = prompt[:1900]
-    api.patch(f"/api/agents/{agent_id}/cron/{cron_id}", {"prompt": prompt})
+    api.patch(
+        f"/api/agents/{agent_id}/cron/{cron_id}",
+        {"prompt": prompt, "model": model_ref},
+    )
 
     before = _job_row(api, agent_id, cron_id)
     before_run_at = int(before.get("last_run_at") or 0)
 
-    rec = Analysis(attempt=attempt, output_path=str(out_path))
-    log(f"第 {attempt} 次分析：触发子代理（{MODEL_REF}）")
+    rec = Analysis(attempt=attempt, output_path=str(out_path), model_ref=model_ref)
+    log(f"第 {attempt} 次分析：触发子代理（模型 {model_ref}）")
     api.post(f"/api/agents/{agent_id}/cron/{cron_id}/run-now")
 
     deadline = time.time() + ANALYSIS_TIMEOUT_S
@@ -493,12 +593,22 @@ def run_analysis(
         return rec
 
     if not out_path.exists():
-        rec.detail = "子代理没有产出分析文件"
+        evidence = rate_limit_evidence(model_ref, log_offset)
+        rec.detail = (
+            f"子代理没有产出分析文件；但服务端日志显示该模型命中 429：{evidence}"
+            if evidence
+            else "子代理没有产出分析文件"
+        )
         return rec
     try:
         rec.text = out_path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         rec.detail = f"分析文件读取失败：{exc}"
+        return rec
+    if analysis_saw_no_log(rec.text):
+        # 子代理没看到日志（路径不可见 / 日志被删）却交了报告 —— 这种报告是空的，
+        # 不能当成功，否则凌晨的结论就是"没法分析"。
+        rec.detail = "子代理没能读到测试日志（报告里说日志不存在），分析无效"
         return rec
     rec.ok = True
     rec.detail = f"分析报告 {out_path.name}（{len(rec.text)} 字符）"
@@ -510,6 +620,164 @@ def _job_row(api: Api, agent_id: str, cron_id: str) -> dict[str, Any]:
     return row if isinstance(row, dict) else {}
 
 
+# 子代理"没找到日志"时会说的字样。只在报告开头（总判断那几行）里找，
+# 免得正文里引用测试输出里的同名词造成误判。
+NO_LOG_MARKERS = (
+    "no such file or directory",
+    "path_not_found",
+    "日志文件不存在",
+    "在文件系统中不存在",
+    "无法分析",
+)
+
+
+def analysis_saw_no_log(text: str) -> bool:
+    """判断子代理是不是因为"看不到日志"而交了报告。"""
+    head = text[:1500].lower()
+    return any(marker in head for marker in NO_LOG_MARKERS)
+
+
+# ── 模型容灾：429 识别 / 证据 / 切换 ─────────────────────────────────────────
+
+# 网关限流的几种文案（litellm / openai SDK / 上游 body 都会命中）：
+#   openai.RateLimitError: Error code: 429 - {... 'code': 'free_campaign_global_limit'}
+#   RateLimitError: Error code: 429
+#   httpx: 429 Too Many Requests
+RATE_LIMIT_MARKERS = (
+    "ratelimiterror",
+    "rate_limit",
+    "too many requests",
+    "error code: 429",
+    "free_campaign_global_limit",
+)
+
+
+def is_rate_limit(text: str | None) -> bool:
+    """判断一段错误文本是不是 429 限流。"""
+    if not text:
+        return False
+    low = text.lower()
+    return any(marker in low for marker in RATE_LIMIT_MARKERS)
+
+
+def server_log_offset() -> int:
+    """当前服务端日志的字节位置（用来只读本次尝试之后新增的日志）。"""
+    try:
+        return SERVER_LOG.stat().st_size
+    except OSError:
+        return 0
+
+
+def rate_limit_evidence(model_ref: str, since_offset: int = 0, limit: int = 400_000) -> str:
+    """从服务端日志里找该模型最近一条 429 证据行 —— 回答"是哪个模型 429"。
+
+    ``since_offset`` 之前的日志一律不看，避免把上次运行的旧 429 算到这次头上。
+    """
+    try:
+        with SERVER_LOG.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            start = max(0, since_offset, size - limit)
+            fh.seek(start)
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    model_id = model_ref.split("/", 1)[1] if "/" in model_ref else model_ref
+    hit = ""
+    for line in tail.splitlines():
+        if not is_rate_limit(line):
+            continue
+        if model_ref in line or model_id in line:
+            hit = line.strip()
+    return hit[:400]
+
+
+@dataclass
+class ModelAttempt:
+    """一次分析尝试的记录（用于日志与报告）。"""
+
+    model_ref: str
+    attempt: int
+    ok: bool
+    detail: str
+    rate_limited: bool
+    evidence: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "model_ref": self.model_ref,
+            "attempt": self.attempt,
+            "ok": self.ok,
+            "rate_limited": self.rate_limited,
+            "detail": self.detail,
+            "evidence": self.evidence,
+        }
+
+
+def model_chain() -> list[str]:
+    """模型链：主模型在前，备用模型在后（容灾开关）。"""
+    chain = [MODEL_REF]
+    if FALLBACK_MODEL_REF and FALLBACK_MODEL_REF != MODEL_REF:
+        chain.append(FALLBACK_MODEL_REF)
+    return chain
+
+
+def set_cron_model(api: Api, agent_id: str, cron_id: str, model_ref: str) -> None:
+    """把分析用的 cron job 切到指定模型。"""
+    api.patch(f"/api/agents/{agent_id}/cron/{cron_id}", {"model": model_ref})
+    log(f"cron job 的分析模型已切换为 {model_ref}")
+
+
+def analyze_with_failover(
+    api: Api,
+    agent_id: str,
+    cron_id: str,
+    run: TestRun,
+) -> tuple[Analysis | None, list[ModelAttempt]]:
+    """按模型链做分析：主模型重试耗尽且仍是 429 → 切到备用模型继续。
+
+    非 429 的失败不触发切换（换模型也救不了），保持原口径：重试耗尽即终止。
+    """
+    chain = model_chain()
+    attempts: list[ModelAttempt] = []
+    analysis: Analysis | None = None
+
+    for index, model_ref in enumerate(chain):
+        for i in range(1, MAX_ATTEMPTS + 1):
+            log_offset = server_log_offset()
+            analysis = run_analysis(api, agent_id, cron_id, run, i, model_ref, log_offset)
+            rate_limited = is_rate_limit(analysis.detail) or is_rate_limit(analysis.job_error)
+            evidence = rate_limit_evidence(model_ref, log_offset) if rate_limited else ""
+            attempts.append(
+                ModelAttempt(model_ref, i, analysis.ok, analysis.detail, rate_limited, evidence)
+            )
+            if analysis.ok:
+                log(f"分析成功（模型 {model_ref}，第 {i} 次）")
+                return analysis, attempts
+            log(
+                f"分析第 {i}/{MAX_ATTEMPTS} 次失败（模型 {model_ref}）：{analysis.detail}"
+                + (f" —— 命中 429 限流，证据：{evidence}" if rate_limited else "")
+            )
+            if i < MAX_ATTEMPTS:
+                # 免费模型容易撞 429 限流，退避后再试，别把额度一次打光
+                wait = 60 * i
+                log(f"等待 {wait}s 后重试分析（仍用 {model_ref}）")
+                time.sleep(wait)
+
+        last = attempts[-1]
+        if not last.rate_limited:
+            log(f"模型 {model_ref} 重试 {MAX_ATTEMPTS} 次仍失败（非 429 限流），不切换模型")
+            return analysis, attempts
+        if index == len(chain) - 1:
+            log(f"模型 {model_ref} 重试 {MAX_ATTEMPTS} 次仍是 429，且没有更多备用模型，终止")
+            return analysis, attempts
+        next_ref = chain[index + 1]
+        log(f"⚠ 命中 429 的模型：{model_ref}（连续 {MAX_ATTEMPTS} 次） → 切换到备用模型 {next_ref}")
+        set_cron_model(api, agent_id, cron_id, next_ref)
+
+    return analysis, attempts
+
+
 # ── 报告 ─────────────────────────────────────────────────────────────────────
 
 
@@ -519,12 +787,18 @@ def write_report(
     final: str,
     detail: str,
     history: list[TestRun],
+    attempts: list[ModelAttempt] | None = None,
 ) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
+    attempts = attempts or []
+    used_model = next((a.model_ref for a in reversed(attempts) if a.ok), MODEL_REF)
+    switched = len({a.model_ref for a in attempts}) > 1
     payload = {
         "finished_at": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "model_ref": MODEL_REF,
+        "fallback_model_ref": FALLBACK_MODEL_REF,
+        "analysis_model": used_model,
         "repo": str(REPO_DIR),
         "pytest_args": PYTEST_ARGS,
         "final": final,
@@ -545,6 +819,13 @@ def write_report(
             "job_status": analysis.job_status,
             "job_error": analysis.job_error,
             "detail": analysis.detail,
+            "model_ref": analysis.model_ref,
+        },
+        "failover": {
+            "chain": model_chain(),
+            "switched": switched,
+            "analysis_model": used_model,
+            "attempts": [a.to_dict() for a in attempts],
         },
         "history": [
             {
@@ -566,7 +847,8 @@ def write_report(
         f"- 时间：{payload['finished_at']}",
         f"- 仓库：{REPO_DIR}",
         f"- 命令：`{PYTHON_BIN} -m pytest {PYTEST_ARGS}`",
-        f"- 分析模型：{MODEL_REF}",
+        f"- 分析模型：{MODEL_REF}（备用：{FALLBACK_MODEL_REF or '无'}）",
+        f"- 实际分析模型：{used_model}" + ("（已容灾切换）" if switched else ""),
         f"- 结论：**{final}**",
         f"- 说明：{detail}",
         "",
@@ -585,6 +867,26 @@ def write_report(
             md.append(
                 f"| {h.attempt} | {h.exit_code} | {h.duration_s:.0f}s | {h.exception or '-'} |"
             )
+    if attempts:
+        md += [
+            "",
+            "## 模型容灾",
+            "",
+            f"- 模型链：{' → '.join(model_chain())}",
+            f"- 是否切换：{'是' if switched else '否'}",
+            "",
+            "| 轮次 | 模型 | 结果 | 429 | 失败原因 |",
+            "|---|---|---|---|---|",
+        ]
+        for a in attempts:
+            md.append(
+                f"| {a.attempt} | {a.model_ref} | {'成功' if a.ok else '失败'} "
+                f"| {'是' if a.rate_limited else '否'} | {a.detail.replace('|', '/')} |"
+            )
+        evidence_lines = [a.evidence for a in attempts if a.evidence]
+        if evidence_lines:
+            md += ["", "429 证据（服务端日志）：", ""]
+            md += [f"- {line}" for line in dict.fromkeys(evidence_lines)]
     if analysis is not None:
         md += ["", "## 子代理分析", "", f"- 状态：{analysis.detail}"]
         if analysis.ok:
@@ -646,15 +948,22 @@ def main(argv: list[str] | None = None) -> int:
     ANALYSIS_TIMEOUT_S = args.analysis_timeout
     MAX_ATTEMPTS = max(1, args.attempts)
 
-    log(f"开始：model={MODEL_REF} repo={REPO_DIR} 最大尝试={MAX_ATTEMPTS}")
+    log(
+        f"开始：model={MODEL_REF} 备用={FALLBACK_MODEL_REF or '无'} "
+        f"repo={REPO_DIR} 最大尝试={MAX_ATTEMPTS}"
+    )
     history: list[TestRun] = []
     analysis: Analysis | None = None
+    attempts: list[ModelAttempt] = []
 
     try:
         token = retry(lambda: mint_admin_token(TOKEN_TTL_S), what="签发 admin token")
         api = Api(BASE_URL, token)
         preflight(api)
-        retry(lambda: ensure_provider_model(api), what="登记模型")
+        retry(
+            lambda: ensure_provider_models(api, [MODEL_ID, FALLBACK_MODEL_ID]),
+            what="登记模型",
+        )
         agent_id = retry(lambda: ensure_agent(api), what="准备 agent")
         cron_id = retry(lambda: ensure_cron(api, agent_id), what="准备 cron job")
         log(f"agent={agent_id} cron={cron_id}")
@@ -681,35 +990,35 @@ def main(argv: list[str] | None = None) -> int:
                 "error",
                 f"不可跳过的异常，重试 {MAX_ATTEMPTS} 次后终止：{detail}",
                 history,
+                attempts,
             )
             return 2
 
-        # ── 子代理分析结果 ──
+        # ── 子代理分析结果（主模型撞 429 就切备用模型） ──
         if not args.no_analysis:
-            for i in range(1, MAX_ATTEMPTS + 1):
-                analysis = run_analysis(api, agent_id, cron_id, run, i)
-                if analysis.ok:
-                    break
-                log(f"分析第 {i} 次失败：{analysis.detail}")
-                if i < MAX_ATTEMPTS:
-                    # 免费模型容易撞 429 限流，退避后再试，别把额度一次打光
-                    wait = 60 * i
-                    log(f"等待 {wait}s 后重试分析")
-                    time.sleep(wait)
+            try:
+                analysis, attempts = analyze_with_failover(api, agent_id, cron_id, run)
+            finally:
+                # 无论成败都把 cron 的模型恢复成主模型，避免污染下一次手动执行
+                try:
+                    set_cron_model(api, agent_id, cron_id, MODEL_REF)
+                except Exception as exc:  # noqa: BLE001 — 恢复失败不掩盖主结果
+                    log(f"恢复 cron 模型为 {MODEL_REF} 失败：{exc}")
             if analysis is None or not analysis.ok:
                 detail = analysis.detail if analysis else "未执行"
                 write_report(
                     run,
                     analysis,
                     "error",
-                    f"子代理分析重试 {MAX_ATTEMPTS} 次仍失败：{detail}",
+                    f"子代理分析失败（{len(attempts)} 次尝试）：{detail}",
                     history,
+                    attempts,
                 )
                 return 2
 
         final = "pass" if run.passed else "fail"
         detail = "全量测试通过" if run.passed else f"全量测试完成但有失败用例：{run.summary}"
-        write_report(run, analysis, final, detail, history)
+        write_report(run, analysis, final, detail, history, attempts)
         return 0 if run.passed else 1
     except Fatal as exc:
         log(f"不可跳过的异常：{exc}")
