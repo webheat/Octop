@@ -30,7 +30,9 @@ const { Text } = Typography;
  * runtime exists, the primary action walks the user through installing the
  * video production components in one click.
  */
-export default function VideoEnvironmentPage() {
+export default function VideoEnvironmentPage({
+  onReturn,
+}: { onReturn?: () => void } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   // In the customer-facing shell there is no navigation rail, so this page
@@ -246,7 +248,15 @@ export default function VideoEnvironmentPage() {
         <Space style={{ marginTop: 20 }}>
           <Button
             type="primary"
-            onClick={() => navigate("/product-library/video-wizard")}
+            onClick={() =>
+              onReturn
+                ? onReturn()
+                : navigate(
+                    desktopMinimal
+                      ? "/local-video-wizard"
+                      : "/product-library/video-wizard",
+                  )
+            }
           >
             {t("videoEnvironment.openWizard")}
           </Button>
@@ -352,9 +362,15 @@ export default function VideoEnvironmentPage() {
           {desktopMinimal && (
             <Button
               icon={<ArrowLeft size={14} />}
-              onClick={() => navigate("/product-library")}
+              onClick={() =>
+                onReturn ? onReturn() : navigate("/product-library")
+              }
             >
-              {t("videoEnvironment.backToLibrary")}
+              {t(
+                onReturn
+                  ? "localVideoWizard.back"
+                  : "videoEnvironment.backToLibrary",
+              )}
             </Button>
           )}
           <Button

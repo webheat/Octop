@@ -23,6 +23,7 @@ export interface LocalAsset {
   localPath?: string;
   productId?: string;
   createdAt?: number;
+  recognitionError?: string;
 }
 
 export interface LocalProduct {
@@ -109,6 +110,19 @@ export const localLibrary = {
       },
     });
     return res.items ?? [];
+  },
+
+  async recognizeExisting(
+    ids: string[],
+  ): Promise<Array<Pick<LocalAsset, "id"> & Partial<LocalAsset>>> {
+    const items: Array<Pick<LocalAsset, "id"> & Partial<LocalAsset>> = [];
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      const res = await call<{ items: typeof items }>("recognizeExisting", {
+        body: { ids: ids.slice(offset, offset + 500), mode: "categorize" },
+      });
+      items.push(...(res.items ?? []));
+    }
+    return items;
   },
 
   async list(): Promise<LocalAsset[]> {
@@ -245,7 +259,7 @@ export function groupPlan(input: {
 }> {
   return request("/product-library/group-plan", {
     method: "POST",
-    body: JSON.stringify({ items: input.items }),
+    body: JSON.stringify(input.items),
   });
 }
 
@@ -263,7 +277,11 @@ export function planLocal(input: {
     media_type: string;
     usage?: string;
     priority?: number;
+    description?: string;
+    tags?: string[];
+    category?: string;
   }>;
+  generator?: "template" | "llm";
   request?: {
     instructions?: string;
     format?: "landscape" | "portrait" | "square";
@@ -277,6 +295,7 @@ export function planLocal(input: {
     body: JSON.stringify({
       product: input.product,
       assets: input.assets,
+      generator: input.generator ?? "template",
       request: {
         format: "portrait",
         language: "zh",

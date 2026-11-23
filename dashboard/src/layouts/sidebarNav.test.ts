@@ -82,7 +82,7 @@ describe("sidebarNav", () => {
     expect(keys).toContain("product-library");
   });
 
-  it("retires the hosted library and wizard in the desktop shell", () => {
+  it("exposes separate local library and video entries in the desktop shell", () => {
     const keys = buildNavSections(adminUser, {
       mobileEnabled: true,
       isDesktop: true,
@@ -91,6 +91,15 @@ describe("sidebarNav", () => {
       .map((item) => item.key);
     expect(keys).toContain("local-library");
     expect(keys).not.toContain("product-library");
-    expect(keys).not.toContain("video-wizard");
+    expect(keys).toContain("video-wizard");
+    const items = buildNavSections(adminUser, { isDesktop: true }).flatMap(
+      (section) => section.items,
+    );
+    expect(items.find((item) => item.key === "local-library")?.path).toBe(
+      "/local-library",
+    );
+    expect(items.find((item) => item.key === "video-wizard")?.path).toBe(
+      "/local-video-wizard",
+    );
   });
 });

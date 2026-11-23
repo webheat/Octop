@@ -191,3 +191,93 @@ def test_group_local_plan_uses_category_when_group_placeholder() -> None:
     assert len(plan["groups"]) == 1
     assert plan["groups"][0]["suggested_name"] == "鞋履"
     assert len(plan["groups"][0]["items"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_local_ai_plan_uses_recognized_metadata_and_validates_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from fastapi import HTTPException
+
+    from octop.api.routers.product_library import LocalPlanBody, plan_local
+    from octop.infra.product_library import llm_video_planner
+
+    body = LocalPlanBody.model_validate(
+        {
+            "generator": "llm",
+            "product": {"name": "chair"},
+            "assets": [
+                {
+                    "id": "L1",
+                    "filename": "chair.png",
+                    "description": "wooden chair",
+                    "category": "furniture",
+                    "tags": ["wood"],
+                }
+            ],
+            "request": {},
+        }
+    )
+    captured: dict[str, Any] = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "scenes": [
+                                            {
+                                                "id": "one",
+                                                "type": "image",
+                                                "duration": 4,
+                                                "asset": "L1-chair.png",
+                                            }
+                                        ]
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode()
+
+    def fake_open(req: Any, timeout: int) -> Response:
+        captured.update(json.loads(req.data))
+        return Response()
+
+    monkeypatch.setenv("OCTOP_VIDEO_LLM_API_KEY", "test")
+    monkeypatch.setenv("OCTOP_VIDEO_LLM_BASE_URL", "https://example.invalid")
+    monkeypatch.setenv("OCTOP_VIDEO_LLM_MODEL", "cheap-test-model")
+    monkeypatch.setattr(llm_video_planner.urllib.request, "urlopen", fake_open)
+    result = await plan_local(body, user=None)
+    assert result["generator"] == "llm"
+    sent = json.loads(captured["messages"][1]["content"])["allowed_assets"][0]
+    assert sent == {
+        "export_name": "L1-chair.png",
+        "media_type": "image/jpeg",
+        "description": "wooden chair",
+        "category": "furniture",
+        "tags": ["wood"],
+    }
+
+    def invalid(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"scenes": [{"id": "one", "type": "image", "duration": 4, "asset": "foreign.png"}]}
+
+    monkeypatch.setattr(llm_video_planner, "_call_model", invalid)
+    with pytest.raises(HTTPException) as exc:
+        await plan_local(body, user=None)
+    assert exc.value.status_code == 502

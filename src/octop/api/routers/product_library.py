@@ -669,6 +669,9 @@ class LocalPlanAsset(BaseModel):
     media_type: str = Field(default="image/jpeg", max_length=100)
     usage: str = Field(default="scene", max_length=32)
     priority: int = 0
+    category: str = Field(default="", max_length=100)
+    description: str = Field(default="", max_length=2000)
+    tags: list[str] = Field(default_factory=list, max_length=12)
 
 
 class LocalPlanProduct(BaseModel):
@@ -682,14 +685,15 @@ class LocalPlanBody(BaseModel):
     product: LocalPlanProduct
     assets: list[LocalPlanAsset] = Field(default_factory=list, max_length=200)
     request: VideoPlanRequest
+    generator: Literal["template", "llm"] = "template"
 
 
 @router.post(
     "/product-library/plan-local",
-    summary="Deterministic Remotion plan for client-side material (no LLM, no storage)",
+    summary="Plan a video from client-side material metadata",
     description=(
-        "Builds a validated template storyboard from client-supplied product and "
-        "asset metadata. Uses no vision model, reads/writes no files and creates "
+        "Builds a validated template or optional AI storyboard from product and "
+        "asset metadata. Reads/writes no files and creates "
         "no database rows — for local-first clients that keep their own material."
     ),
 )
@@ -698,6 +702,13 @@ async def plan_local(body: LocalPlanBody, user: Any = Depends(current_user)) -> 
         "product": body.product.model_dump(),
         "assets": [a.model_dump() for a in body.assets],
     }
+    if body.generator == "llm":
+        try:
+            return await generate_model_plan(snapshot, body.request)
+        except (ValueError, OSError, KeyError, IndexError, TypeError) as exc:
+            raise HTTPException(
+                status_code=502, detail="Video model unavailable or returned invalid script"
+            ) from exc
     return plan_local_video(snapshot, body.request)
 
 

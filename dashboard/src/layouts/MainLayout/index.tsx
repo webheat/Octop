@@ -1,4 +1,4 @@
-import { Layout } from "antd";
+import { Button, Layout } from "antd";
 import { lazy, Suspense, useEffect, useState, useCallback } from "react";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../Sidebar";
@@ -265,6 +265,35 @@ export default function MainLayout() {
               />
             )}
 
+            {desktopMinimal && (
+              <nav
+                aria-label={t("nav.video")}
+                style={{
+                  width: 200,
+                  flexShrink: 0,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                {[
+                  ["/local-video-wizard", "nav.videoProduction"],
+                  ["/local-library", "nav.localLibrary"],
+                  ["/video-environment", "nav.videoEnvironment"],
+                ].map(([path, label]) => (
+                  <Button
+                    key={path}
+                    type={currentPath === path ? "primary" : "text"}
+                    aria-current={currentPath === path ? "page" : undefined}
+                    onClick={() => navigate(path)}
+                    style={{ textAlign: "left", justifyContent: "flex-start" }}
+                  >
+                    {t(label)}
+                  </Button>
+                ))}
+              </nav>
+            )}
             {!desktopMinimal && (
               <div
                 style={{

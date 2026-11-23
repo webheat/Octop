@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -8,20 +8,13 @@ import {
   Empty,
   Image,
   Input,
-  Progress,
   Select,
   Space,
   Spin,
   Tag,
   Typography,
 } from "antd";
-import {
-  ArrowLeft,
-  FolderOpen,
-  ImagePlus,
-  RefreshCw,
-  Video,
-} from "lucide-react";
+import { ArrowLeft, FolderOpen, ImagePlus, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PageShell from "../../layouts/PageShell";
 import { message } from "../../utils/antdMessage";
@@ -29,21 +22,11 @@ import {
   groupPlan,
   isLocalLibraryAvailable,
   localLibrary,
-  planLocal,
   type LocalAsset,
-  type LocalPlanResult,
   type LocalProduct,
 } from "../../api/localLibrary";
 
-const { Text, Paragraph, Title } = Typography;
-
-interface JobState {
-  id: string;
-  state: string;
-  progress?: number | null;
-  errorCode?: string;
-  videoUrl?: string;
-}
+const { Text, Paragraph } = Typography;
 
 interface ReviewGroup {
   key: string;
@@ -53,13 +36,6 @@ interface ReviewGroup {
   allIds: string[];
   productId: string;
 }
-
-const ACTIVE_STATES = new Set([
-  "preparing",
-  "downloading",
-  "rendering",
-  "starting",
-]);
 
 /**
  * Local-first material library (PRD §3.7). Material bytes stay on this machine;
@@ -75,16 +51,16 @@ export default function LocalLibraryPage() {
   const [assets, setAssets] = useState<LocalAsset[]>([]);
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [grouping, setGrouping] = useState(false);
-  const [title, setTitle] = useState("");
-  const [job, setJob] = useState<JobState | null>(null);
-  const [plan, setPlan] = useState<LocalPlanResult | null>(null);
   const [review, setReview] = useState<ReviewGroup[]>([]);
   const [activeProduct, setActiveProduct] = useState<string>("__inbox__");
-  const pollRef = useRef<number | null>(null);
+  const [recognitionErrors, setRecognitionErrors] = useState<
+    Record<string, string>
+  >({});
+  const [batchIds, setBatchIds] = useState<string[] | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   const assetById = useCallback(
     (id: string) => assets.find((a) => a.id === id),
@@ -100,14 +76,18 @@ export default function LocalLibraryPage() {
       ]);
       setAssets(list);
       setProducts(prods);
+      setRecognitionErrors(
+        Object.fromEntries(
+          list
+            .filter((a) => a.recognitionError)
+            .map((a) => [a.id, a.recognitionError!]),
+        ),
+      );
+      return list;
     } catch {
       message.error(t("localLibrary.loadFailed"));
     }
   }, [available, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   // Load local preview data URLs for images (bytes never hit the server).
   useEffect(() => {
@@ -123,31 +103,11 @@ export default function LocalLibraryPage() {
     };
   }, [assets, previews]);
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current !== null) window.clearInterval(pollRef.current);
-    };
-  }, []);
-
-  const startPolling = useCallback((id: string) => {
-    if (pollRef.current !== null) window.clearInterval(pollRef.current);
-    pollRef.current = window.setInterval(() => {
-      void localLibrary
-        .jobStatus(id)
-        .then((state) => {
-          setJob(state);
-          if (!ACTIVE_STATES.has(state.state) && pollRef.current !== null) {
-            window.clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-        })
-        .catch(() => undefined);
-    }, 1200);
-  }, []);
-
   const buildReview = useCallback(
     async (source: LocalAsset[]) => {
-      const unarchived = source.filter((a) => !a.productId);
+      const unarchived = source.filter(
+        (a) => !a.productId && !a.recognitionError && (a.category || a.group),
+      );
       if (!unarchived.length) {
         setReview([]);
         return;
@@ -187,6 +147,17 @@ export default function LocalLibraryPage() {
     [t],
   );
 
+  useEffect(() => {
+    void load().then((list) => {
+      if (list) void buildReview(list);
+    });
+  }, [load, buildReview]);
+
+  const refresh = async () => {
+    const list = await load();
+    if (list && !review.length) await buildReview(list);
+  };
+
   const importDirectory = async () => {
     setImporting(true);
     try {
@@ -200,6 +171,14 @@ export default function LocalLibraryPage() {
         recognize: true,
         mode: "categorize",
       });
+      setBatchIds(imported.map((asset) => asset.id));
+      setRecognitionErrors(
+        Object.fromEntries(
+          imported
+            .filter((a) => a.recognitionError)
+            .map((a) => [a.id, a.recognitionError!]),
+        ),
+      );
       message.success(t("localLibrary.imported", { count: imported.length }));
       const [list, prods] = await Promise.all([
         localLibrary.list(),
@@ -207,7 +186,8 @@ export default function LocalLibraryPage() {
       ]);
       setAssets(list);
       setProducts(prods);
-      await buildReview(list);
+      if (!review.length) await buildReview(list);
+      else message.info(t("localLibrary.regroupAfterRetry"));
     } catch (err) {
       const code = (err as { code?: string })?.code;
       if (code !== "CANCELLED") message.error(t("localLibrary.importFailed"));
@@ -243,7 +223,13 @@ export default function LocalLibraryPage() {
         }),
       );
       setReview([]);
-      await load();
+      const list = await load();
+      const filedIds = new Set(groups.flatMap((group) => group.itemIds));
+      const firstFiled = list?.find(
+        (asset) => filedIds.has(asset.id) && asset.productId,
+      );
+      if (firstFiled?.productId) setActiveProduct(firstFiled.productId);
+      setSelected(new Set());
     } catch {
       message.error(t("localLibrary.archiveFailed"));
     } finally {
@@ -281,62 +267,40 @@ export default function LocalLibraryPage() {
       ? assets.filter((a) => !a.productId)
       : assets.filter((a) => a.productId === activeProduct);
   const selectedAssets = visibleAssets.filter((a) => selected.has(a.id));
+  const pendingIds = assets
+    .filter(
+      (a) =>
+        a.mediaType.startsWith("image/") &&
+        (!a.category || recognitionErrors[a.id]),
+    )
+    .map((a) => a.id);
 
   const selectProduct = async (productId: string) => {
     setActiveProduct(productId);
     setSelected(new Set());
   };
 
-  const generate = async () => {
-    if (!selectedAssets.length) {
-      message.warning(t("localLibrary.selectFirst"));
-      return;
-    }
-    setBusy(true);
-    setPlan(null);
-    setJob(null);
+  const retryRecognition = async (ids: string[]) => {
+    setRetrying(true);
     try {
-      const projectId = `local-${Date.now()}`;
-      const product = products.find((p) => p.id === activeProduct);
-      const name =
-        title.trim() || product?.name || t("localLibrary.defaultTitle");
-      const result = await planLocal({
-        product: {
-          name,
-          model: product?.model,
-          category: product?.category,
-          selling_points:
-            product?.sellingPoints ??
-            selectedAssets
-              .map((a) => a.description)
-              .filter((d): d is string => Boolean(d))
-              .slice(0, 5),
-        },
-        assets: selectedAssets.map((a) => ({
-          id: a.id,
-          filename: a.filename,
-          media_type: a.mediaType,
-          usage: "scene",
-          priority: 0,
-        })),
-        request: { format: "portrait", language: "zh", seconds_per_asset: 4 },
+      const results = await localLibrary.recognizeExisting(ids);
+      setRecognitionErrors((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.recognitionError)
+            next[result.id] = result.recognitionError;
+          else delete next[result.id];
+        }
+        return next;
       });
-      setPlan(result);
-      const assetMap: Record<string, string> = {};
-      for (const a of result.assets) assetMap[a.export_name] = a.id;
-      const started = await localLibrary.renderLocal({
-        projectId,
-        title: name,
-        script: result.script,
-        assetMap,
-      });
-      setJob({ id: started.jobId, state: started.state });
-      startPolling(started.jobId);
-      message.success(t("localLibrary.renderStarted"));
+      setBatchIds(results.map((asset) => asset.id));
+      const list = await load();
+      if (list && !review.length) await buildReview(list);
+      else if (review.length) message.info(t("localLibrary.regroupAfterRetry"));
     } catch {
-      message.error(t("localLibrary.renderFailed"));
+      message.error(t("localLibrary.recognitionFailed"));
     } finally {
-      setBusy(false);
+      setRetrying(false);
     }
   };
 
@@ -363,9 +327,6 @@ export default function LocalLibraryPage() {
       </PageShell>
     );
   }
-
-  const jobPercent =
-    job?.progress != null ? Math.round(job.progress * 100) : undefined;
 
   const renderCard = (asset: LocalAsset) => (
     <Card
@@ -411,6 +372,37 @@ export default function LocalLibraryPage() {
         {asset.group ? <Tag color="blue">{asset.group}</Tag> : null}
         {asset.category ? <Tag>{asset.category}</Tag> : null}
       </div>
+      {!asset.mediaType.startsWith("image/") ? null : recognitionErrors[
+          asset.id
+        ] ? (
+        <div>
+          <Text type="danger">
+            {t(`localLibrary.errors.${recognitionErrors[asset.id]}`, {
+              defaultValue: t("localLibrary.recognitionFailed"),
+            })}
+          </Text>
+          <Button
+            size="small"
+            loading={retrying}
+            onClick={() => void retryRecognition([asset.id])}
+          >
+            {t("localLibrary.retry")}
+          </Button>
+        </div>
+      ) : asset.category ? (
+        <Text type="success">{t("localLibrary.recognitionDone")}</Text>
+      ) : (
+        <div>
+          <Text type="secondary">{t("localLibrary.notRecognized")}</Text>{" "}
+          <Button
+            size="small"
+            loading={retrying}
+            onClick={() => void retryRecognition([asset.id])}
+          >
+            {t("localLibrary.retry")}
+          </Button>
+        </div>
+      )}
       {asset.description ? (
         <Paragraph
           ellipsis={{ rows: 2 }}
@@ -428,7 +420,7 @@ export default function LocalLibraryPage() {
       subtitle={t("localLibrary.subtitle")}
       actions={
         <Space size={8}>
-          <Button icon={<RefreshCw size={14} />} onClick={() => void load()}>
+          <Button icon={<RefreshCw size={14} />} onClick={() => void refresh()}>
             {t("localLibrary.refresh")}
           </Button>
           <Button
@@ -443,21 +435,57 @@ export default function LocalLibraryPage() {
       }
     >
       <Space direction="vertical" size={16} style={{ width: "100%" }}>
-        <Alert
-          type="success"
-          showIcon
-          message={t("localLibrary.privacyTitle")}
-          description={t("localLibrary.privacyDesc")}
-        />
-
-        <Card title={t("localLibrary.reviewTitle")}>
+        {batchIds !== null ? (
+          <Alert
+            type={
+              batchIds.some((id) => recognitionErrors[id])
+                ? "warning"
+                : "success"
+            }
+            showIcon
+            message={t("localLibrary.batchResult", {
+              count: batchIds.length,
+              failed: batchIds.filter((id) => recognitionErrors[id]).length,
+            })}
+          />
+        ) : null}
+        {pendingIds.length > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("localLibrary.pending", { count: pendingIds.length })}
+            action={
+              <Button
+                loading={retrying}
+                onClick={() => void retryRecognition(pendingIds)}
+              >
+                {t("localLibrary.retryPending", { count: pendingIds.length })}
+              </Button>
+            }
+          />
+        ) : null}
+        <Card
+          title={t("localLibrary.reviewTitle")}
+          extra={
+            <Button
+              loading={grouping}
+              disabled={!assets.some((a) => !a.productId)}
+              onClick={() => void buildReview(assets)}
+            >
+              {t("localLibrary.regroup")}
+            </Button>
+          }
+        >
           {grouping ? (
             <Spin tip={t("localLibrary.grouping")} />
           ) : review.length === 0 ? (
-            <Empty
-              description={t("localLibrary.reviewEmpty")}
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-            />
+            <Text type="secondary">
+              {t(
+                assets.length
+                  ? "localLibrary.reviewEmptyExisting"
+                  : "localLibrary.reviewEmpty",
+              )}
+            </Text>
           ) : (
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
               <Paragraph type="secondary" style={{ marginBottom: 0 }}>
@@ -546,7 +574,26 @@ export default function LocalLibraryPage() {
           )}
         </Card>
 
-        <Card title={t("localLibrary.products", { count: products.length })}>
+        <Card
+          title={t("localLibrary.products", { count: products.length })}
+          extra={
+            <Button
+              type="primary"
+              disabled={!selectedAssets.length}
+              onClick={() =>
+                navigate("/local-video-wizard", {
+                  state: {
+                    assetIds: selectedAssets.map((a) => a.id),
+                    productId:
+                      activeProduct === "__inbox__" ? undefined : activeProduct,
+                  },
+                })
+              }
+            >
+              {t("localLibrary.makeVideo")}
+            </Button>
+          }
+        >
           <Space wrap style={{ marginBottom: 12 }}>
             <Button
               type={activeProduct === "__inbox__" ? "default" : "text"}
@@ -567,78 +614,18 @@ export default function LocalLibraryPage() {
             ))}
           </Space>
           {visibleAssets.length === 0 ? (
-            <Empty description={t("localLibrary.empty")} />
+            <Empty
+              description={t(
+                assets.length
+                  ? "localLibrary.emptySelection"
+                  : "localLibrary.empty",
+              )}
+            />
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
               {visibleAssets.map(renderCard)}
             </div>
           )}
-        </Card>
-
-        <Card title={t("localLibrary.renderTitle")}>
-          <Space direction="vertical" size={12} style={{ width: "100%" }}>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t("localLibrary.titlePlaceholder")}
-              maxLength={60}
-            />
-            <div>
-              <Button
-                type="primary"
-                icon={<Video size={14} />}
-                loading={busy}
-                disabled={!selectedAssets.length}
-                onClick={() => void generate()}
-              >
-                {t("localLibrary.generate", { count: selectedAssets.length })}
-              </Button>
-              {busy ? <Spin style={{ marginLeft: 12 }} /> : null}
-            </div>
-            {plan ? (
-              <Alert
-                type="info"
-                showIcon
-                message={t("localLibrary.planReady", {
-                  scenes: plan.script.scenes.length,
-                  generator: plan.generator,
-                })}
-              />
-            ) : null}
-            {job ? (
-              <div>
-                <Title level={5}>
-                  {t("localLibrary.jobState", {
-                    state: t(`localLibrary.state.${job.state}`, {
-                      defaultValue: job.state,
-                    }),
-                  })}
-                </Title>
-                {jobPercent !== undefined ? (
-                  <Progress
-                    percent={jobPercent}
-                    status={job.state === "completed" ? "success" : "active"}
-                  />
-                ) : null}
-                {job.errorCode ? (
-                  <Text type="danger">{job.errorCode}</Text>
-                ) : null}
-                {job.state === "completed" && job.videoUrl ? (
-                  <Space direction="vertical" style={{ marginTop: 12, width: "100%" }}>
-                    <video
-                      src={job.videoUrl}
-                      controls
-                      playsInline
-                      style={{ width: "100%", maxWidth: 480, borderRadius: 8 }}
-                    />
-                    <a href={job.videoUrl} download="video.mp4">
-                      {t("localLibrary.downloadVideo")}
-                    </a>
-                  </Space>
-                ) : null}
-              </div>
-            ) : null}
-          </Space>
         </Card>
       </Space>
     </PageShell>

@@ -233,7 +233,7 @@ export default function ProductVideoWizardPage() {
   // material from the server. Web console keeps the wizard unchanged.
   useEffect(() => {
     if (isLocalLibraryAvailable()) {
-      navigate("/local-library", { replace: true });
+      navigate("/local-video-wizard", { replace: true });
     }
   }, [navigate]);
 

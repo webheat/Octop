@@ -97,6 +97,7 @@ def _call_model(snapshot: dict[str, Any], request: VideoPlanRequest) -> Any:
     if not api_key or not endpoint or not model or not endpoint.startswith("https://"):
         raise ValueError("configure OCTOP_VIDEO_LLM_API_KEY, HTTPS BASE_URL and MODEL")
     template = build_video_plan(snapshot, request)
+    metadata_by_id = {asset["id"]: asset for asset in snapshot["assets"]}
     payload = {
         "model": model,
         "temperature": 0.3,
@@ -111,7 +112,18 @@ def _call_model(snapshot: dict[str, Any], request: VideoPlanRequest) -> Any:
                     {
                         "brief": request.model_dump(),
                         "product": snapshot["product"],
-                        "allowed_assets": template["assets"],
+                        "allowed_assets": [
+                            {
+                                "export_name": asset["export_name"],
+                                "media_type": asset["media_type"],
+                                **{
+                                    key: metadata_by_id[asset["id"]][key]
+                                    for key in ("category", "description", "tags")
+                                    if key in metadata_by_id[asset["id"]]
+                                },
+                            }
+                            for asset in template["assets"]
+                        ],
                         "example_script": template["script"],
                     },
                     ensure_ascii=False,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Landing page of the customer-facing desktop shell. */
-export const DESKTOP_MINIMAL_LANDING = "/product-library";
+export const DESKTOP_MINIMAL_LANDING = "/local-video-wizard";
 
 /**
  * Marker telling the shell's legacy DOM-based injection that this build
@@ -23,18 +23,18 @@ function desktopMinimalBridge(): boolean {
   return bridge?.version === 1 && bridge.minimalMode !== false;
 }
 
-/** True when the path is already the landing page or one of its sub-routes. */
+/** True for the entry points supported by the customer-facing desktop shell. */
 export function isDesktopMinimalPath(pathname: string): boolean {
   return (
     pathname === DESKTOP_MINIMAL_LANDING ||
-    pathname.startsWith(`${DESKTOP_MINIMAL_LANDING}/`)
+    pathname === "/local-library" ||
+    pathname === "/video-environment" ||
+    pathname === "/product-library/video-wizard"
   );
 }
 
 /**
- * Customer-facing desktop shells present a single surface: no navigation
- * rail, landing on the product library. This is the dashboard's own
- * implementation — it does not depend on the shell guessing DOM structure.
+ * Customer-facing desktop shells use the dashboard's compact video navigation.
  *
  * Ctrl+Shift+F9 keeps the shell's troubleshooting shortcut: restore the full
  * navigation for this page session. The marker stays in place so the shell's
@@ -81,7 +81,7 @@ export function useDesktopMinimalMode(): boolean {
 }
 
 /**
- * Land on the product library once when the shell starts (this also covers
+ * Land on the local video wizard once when the shell starts (this also covers
  * the post-login redirect to /chat). Later navigation is left alone: the
  * shell must not keep forcing the user back to the landing page.
  */

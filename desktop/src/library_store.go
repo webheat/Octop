@@ -32,19 +32,20 @@ var (
 )
 
 type localAsset struct {
-	ID          string   `json:"id"`
-	Filename    string   `json:"filename"`
-	MediaType   string   `json:"mediaType"`
-	Bytes       int64    `json:"bytes"`
-	SHA256      string   `json:"sha256"`
-	Group       string   `json:"group,omitempty"`
-	Category    string   `json:"category,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Usage       string   `json:"usage,omitempty"`
-	ProductID   string   `json:"productId,omitempty"`
-	StoredName  string   `json:"storedName"`
-	CreatedAt   int64    `json:"createdAt"`
+	ID               string   `json:"id"`
+	Filename         string   `json:"filename"`
+	MediaType        string   `json:"mediaType"`
+	Bytes            int64    `json:"bytes"`
+	SHA256           string   `json:"sha256"`
+	Group            string   `json:"group,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Description      string   `json:"description,omitempty"`
+	RecognitionError string   `json:"recognitionError,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	Usage            string   `json:"usage,omitempty"`
+	ProductID        string   `json:"productId,omitempty"`
+	StoredName       string   `json:"storedName"`
+	CreatedAt        int64    `json:"createdAt"`
 }
 
 // localProduct is a product archived into the on-machine library. It is the
@@ -97,8 +98,8 @@ func (s *localLibraryStore) indexPath() string {
 
 func (s *localLibraryStore) loadLocked() (localLibraryIndex, error) {
 	idx := localLibraryIndex{
-		Version: localLibraryVersion,
-		Assets:  []localAsset{},
+		Version:  localLibraryVersion,
+		Assets:   []localAsset{},
 		Products: []localProduct{},
 	}
 	data, err := os.ReadFile(s.indexPath())
@@ -186,6 +187,7 @@ func (s *localLibraryStore) Add(filename, mediaType string, data []byte, meta ma
 	asset.Group = stringField(meta, "group")
 	asset.Category = stringField(meta, "category")
 	asset.Description = stringField(meta, "description")
+	asset.RecognitionError = stringField(meta, "recognitionError")
 	asset.Usage = stringField(meta, "usage")
 	asset.Tags = stringSliceField(meta, "tags")
 	replaced := false
@@ -198,6 +200,9 @@ func (s *localLibraryStore) Add(filename, mediaType string, data []byte, meta ma
 			asset.StoredName = existing.StoredName
 			asset.CreatedAt = existing.CreatedAt
 			asset.ProductID = existing.ProductID
+			if _, attempted := meta["recognitionError"]; !attempted {
+				asset.RecognitionError = existing.RecognitionError
+			}
 			if asset.Group == "" {
 				asset.Group = existing.Group
 			}
@@ -239,6 +244,9 @@ func (s *localLibraryStore) UpdateMeta(id string, meta map[string]any) (localAss
 			}
 			if v, ok := meta["category"]; ok {
 				idx.Assets[i].Category = fmt.Sprint(v)
+			}
+			if v, ok := meta["recognitionError"]; ok {
+				idx.Assets[i].RecognitionError = fmt.Sprint(v)
 			}
 			if v, ok := meta["description"]; ok {
 				idx.Assets[i].Description = fmt.Sprint(v)

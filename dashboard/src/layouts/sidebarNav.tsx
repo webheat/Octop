@@ -221,7 +221,7 @@ export function buildNavSections(
     key: "local-library",
     path: "/local-library",
     icon: <HardDrive size={iconSize} strokeWidth={iconStroke} />,
-    labelKey: isDesktop ? "nav.videoProduction" : "nav.localLibrary",
+    labelKey: "nav.localLibrary",
   });
   // 产品要求隐藏以下三个入口（专家 / 自动化 / Token 统计）。
   // 需要恢复时取消下面三段的注释，并恢复顶部对应的三个 icon import 即可。
@@ -254,10 +254,10 @@ export function buildNavSections(
   // Video tooling is visible to everyone; the paid analysis entry is dimmed
   // for account types without the paid-tier entitlement.
   const videoItems: NavItem[] = [];
-  if (!isDesktop) {
+  {
     videoItems.push({
       key: "video-wizard",
-      path: "/product-library/video-wizard",
+      path: isDesktop ? "/local-video-wizard" : "/product-library/video-wizard",
       icon: <Clapperboard size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.videoProduction",
     });

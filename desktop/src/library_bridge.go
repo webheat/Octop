@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -76,7 +77,7 @@ func (l *libraryEventListener) DispatchWailsEvent(e *application.CustomEvent) {
 func libraryErrorCode(err error) string {
 	code := err.Error()
 	switch code {
-	case "AUTH_REQUIRED", "LIBRARY_NOT_FOUND", "LIBRARY_INVALID", "LIBRARY_IO", "INTERNAL", "CANCELLED":
+	case "AUTH_REQUIRED", "LIBRARY_NOT_FOUND", "LIBRARY_INVALID", "LIBRARY_IO", "INTERNAL", "CANCELLED", "RUNTIME_MISSING":
 		return code
 	}
 	log.Printf("desktop library error: %v", err)
@@ -143,6 +144,9 @@ func (a *App) libraryAction(action, token string, payload map[string]json.RawMes
 
 	case "ingest":
 		return a.libraryIngest(store, token, payload)
+
+	case "recognizeExisting":
+		return a.libraryRecognizeExisting(store, token, payload)
 
 	case "updateMeta":
 		var body struct {
@@ -256,10 +260,17 @@ func (a *App) libraryIngest(store *localLibraryStore, token string, payload map[
 		}
 		mediaType := mimeTypeFor(cleaned)
 		meta := map[string]any{}
+		recognitionError := ""
 		if body.Recognize && strings.HasPrefix(mediaType, "image/") {
-			if payload, ok := a.recognizeBytes(token, data, mediaType, filepath.Base(filepath.Dir(cleaned)), body.Mode); ok {
-				meta = payload
+			var err error
+			meta, err = a.recognizeBytes(token, data, mediaType, filepath.Base(filepath.Dir(cleaned)), body.Mode)
+			if err != nil {
+				recognitionError = err.Error()
 			}
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			meta["recognitionError"] = recognitionError
 		}
 		asset, addErr := store.Add(filepath.Base(cleaned), mediaType, data, meta)
 		if addErr != nil {
@@ -270,25 +281,70 @@ func (a *App) libraryIngest(store *localLibraryStore, token string, payload map[
 			"bytes": asset.Bytes, "sha256": asset.SHA256,
 			"group": asset.Group, "category": asset.Category,
 			"description": asset.Description, "tags": asset.Tags,
-			"localPath": cleaned,
+			"localPath": cleaned, "recognitionError": recognitionError,
 		})
 	}
 	return map[string]any{"items": results}, nil
 }
 
+// libraryRecognizeExisting retries recognition using the stored local bytes.
+func (a *App) libraryRecognizeExisting(store *localLibraryStore, token string, payload map[string]json.RawMessage) (any, error) {
+	var body struct {
+		IDs  []string `json:"ids"`
+		Mode string   `json:"mode"`
+	}
+	if json.Unmarshal(payload["body"], &body) != nil || len(body.IDs) == 0 || len(body.IDs) > 500 {
+		return nil, errLibraryInvalid
+	}
+	results := make([]map[string]any, 0, len(body.IDs))
+	for _, id := range body.IDs {
+		item := map[string]any{"id": id}
+		data, asset, err := store.Read(id)
+		if err == nil {
+			var meta map[string]any
+			meta, err = a.recognizeBytes(token, data, asset.MediaType, "", body.Mode)
+			if err == nil {
+				meta["recognitionError"] = ""
+				if body.Mode == "describe" {
+					delete(meta, "group")
+					delete(meta, "category")
+				}
+				asset, err = store.UpdateMeta(id, meta)
+			}
+		}
+		if err != nil {
+			code := err.Error()
+			if _, saveErr := store.UpdateMeta(id, map[string]any{"recognitionError": code}); saveErr != nil {
+				code = saveErr.Error()
+			}
+			item["recognitionError"] = code
+		} else {
+			item["group"] = asset.Group
+			item["category"] = asset.Category
+			item["description"] = asset.Description
+			item["tags"] = asset.Tags
+		}
+		results = append(results, item)
+	}
+	return map[string]any{"items": results}, nil
+}
+
 // recognizeBytes posts one image to the stateless backend recognize endpoint.
-func (a *App) recognizeBytes(token string, data []byte, mediaType, folderHint, mode string) (map[string]any, bool) {
+func (a *App) recognizeBytes(token string, data []byte, mediaType, folderHint, mode string) (map[string]any, error) {
 	if a.video == nil {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
 	if mode != "categorize" && mode != "describe" {
 		mode = "categorize"
 	}
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	part, err := w.CreateFormFile("files", "image")
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", `form-data; name="files"; filename="image"`)
+	header.Set("Content-Type", mediaType)
+	part, err := w.CreatePart(header)
 	if err != nil {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
 	_, _ = part.Write(data)
 	_ = w.WriteField("mode", mode)
@@ -298,25 +354,37 @@ func (a *App) recognizeBytes(token string, data []byte, mediaType, folderHint, m
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.video.apiURL("/product-library/recognize"), &buf)
 	if err != nil {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	resp, err := a.video.client.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
 	var out struct {
 		Items []map[string]any `json:"items"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out) != nil || len(out.Items) == 0 {
-		return nil, false
+		return nil, errors.New("RECOGNITION_FAILED")
 	}
-	return out.Items[0], true
+	if message, ok := out.Items[0]["error"].(string); ok && message != "" {
+		switch {
+		case strings.Contains(message, "no enabled vision model") || strings.Contains(message, "no vision model configured"):
+			return nil, errors.New("VISION_MODEL_UNAVAILABLE")
+		case strings.Contains(message, "image exceeds the vision size limit"):
+			return nil, errors.New("IMAGE_TOO_LARGE")
+		case strings.HasPrefix(message, "unsupported image type:"):
+			return nil, errors.New("IMAGE_UNSUPPORTED")
+		default:
+			return nil, errors.New("RECOGNITION_FAILED")
+		}
+	}
+	return out.Items[0], nil
 }
 
 func stringPayload(payload map[string]json.RawMessage, key string) string {
