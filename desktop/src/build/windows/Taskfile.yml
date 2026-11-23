@@ -189,7 +189,11 @@ tasks:
       # The WebView2 bootstrapper is optional: it only helps machines without
       # the runtime. It is Microsoft-signed, so it never trips the block we are
       # dodging. Generation needs network access — skip it when offline.
-      - sh: 'mkdir -p "{{.ROOT_DIR}}/bin/green-webview2" && wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/bin/green-webview2" || true'
+      - cmd: >-
+          powershell -NoProfile -Command
+          "New-Item -ItemType Directory -Force '{{.ROOT_DIR}}/bin/green-webview2' | Out-Null;
+          wails3 generate webview2bootstrapper -dir '{{.ROOT_DIR}}/bin/green-webview2';
+          exit 0"
       # The PowerShell lives in a script file: a -Command one-liner would have
       # its $variables eaten by the shell that go-task spawns.
       - cmd: >-
@@ -211,7 +215,7 @@ tasks:
     summary: Wraps Octop.exe in an NSIS installer (Program Files + shortcuts)
     dir: build/windows/nsis
     preconditions:
-      - sh: '"{{.MAKENSIS}}" -VERSION'
+      - cmd: '"{{.MAKENSIS}}" -VERSION'
         msg: "The workspace-local NSIS compiler is missing."
     cmds:
       - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
