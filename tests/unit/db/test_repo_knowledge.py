@@ -12,6 +12,10 @@ from octop.infra.db.repos.knowledge import KnowledgeRepo
 from octop.infra.db.repos.users import UserRepo
 from octop.infra.utils.paths import PathLayout
 
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+# Derived from the migration files so adding one only means adding the file.
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS_DIR.glob("*.sql"))
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> SqlitePool:
@@ -50,7 +54,7 @@ def test_knowledge_tables_migrated(db: SqlitePool) -> None:
         "knowledge_bases",
         "knowledge_documents",
     }.issubset(names)
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert "knowledge_base_members" not in names
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
     assert "knowledge_base_id" in cols

@@ -11,6 +11,8 @@ from octop.infra.db.pool import SqlitePool
 from octop.infra.db.repos.skill_packages import SkillPackageRepo
 
 _MIGRATIONS = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+# Derived from the migration files so adding one only means adding the file.
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS.glob("*.sql"))
 
 
 @pytest.fixture
@@ -28,7 +30,7 @@ def test_skill_packages_table_exists(db: SqlitePool) -> None:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(skill_packages)").fetchall()}
     assert "skill_packages" in names
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert "skill_package_id" in cols
 
 

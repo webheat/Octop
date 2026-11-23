@@ -29,6 +29,9 @@ _SSO_KIND_PERMISSION = {
     "feishu": "sso_feishu",
     "wecom": "sso_wecom",
     "dingtalk": "sso_dingtalk",
+    # The admin UI gates the WeChat Open Platform tab with the generic OIDC
+    # permission too (dashboard ``USERS_TAB_PERMISSIONS``).
+    "wechat_open": "sso_oidc",
     "oidc": "sso_oidc",
 }
 

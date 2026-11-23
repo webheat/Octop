@@ -125,7 +125,10 @@ def test_execute_without_jail_rewrites_virtual_command_paths(tmp_path: Path) -> 
     cannot raise ``PermissionError`` from ``Path.exists``.
     """
     spec, scoped, workspace = _scoped_spec(tmp_path)
-    (scoped / "out").mkdir()
+    # The harness keeps a host path that already exists, so the virtual tree
+    # needs a top-level name no host can have (``/out`` exists on some hosts).
+    virtual_dir = f"octop-virtual-{uuid.uuid4().hex}"
+    (scoped / virtual_dir).mkdir()
     with patch(
         "octop_harness.backends.bwrap_shell.resolve_bubbled_bwrap",
         return_value=None,
@@ -133,7 +136,7 @@ def test_execute_without_jail_rewrites_virtual_command_paths(tmp_path: Path) -> 
         backend = resolve_backend(spec, workspace_dir=workspace)
     assert isinstance(backend, HarnessLocalShellBackend)
 
-    expected = str((scoped / "out" / "mapped.txt").resolve())
+    expected = str((scoped / virtual_dir / "mapped.txt").resolve())
     with (
         patch.object(
             HarnessLocalShellBackend,
@@ -145,7 +148,7 @@ def test_execute_without_jail_rewrites_virtual_command_paths(tmp_path: Path) -> 
             side_effect=lambda env, *_a, **_k: env,
         ),
     ):
-        result = backend.execute("echo x > /out/mapped.txt")
+        result = backend.execute(f"echo x > /{virtual_dir}/mapped.txt")
 
     assert result.exit_code == 0
     assert host_exec.call_args.args[0] == f"echo x > {expected}"

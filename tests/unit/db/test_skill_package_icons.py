@@ -12,6 +12,8 @@ from octop.infra.db.pool import SqlitePool
 from octop.infra.db.repos.skill_packages import SkillPackageRepo
 
 _MIGRATIONS = Path(__file__).resolve().parents[3] / "src/octop/infra/db/migrations"
+# Derived from the migration files so adding one only means adding the file.
+MAX_SCHEMA_VERSION = max(int(p.name.split("_", 1)[0]) for p in _MIGRATIONS.glob("*.sql"))
 
 _LEGACY_SKILL_PACKAGES_WITHOUT_ICONS = """
 CREATE TABLE skill_packages (
@@ -93,7 +95,7 @@ def test_migration_002_idempotent_when_icon_columns_already_present(tmp_path: Pa
                 "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='skill_packages'"
             )
         }
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert "icon_name" in cols
     assert "icon_url" in cols
     assert "skill_package_id" in cols
@@ -112,7 +114,7 @@ def test_repair_legacy_schema_adds_icon_columns_at_version_2(tmp_path: Path) -> 
     with pool.connect() as conn:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(skill_packages)").fetchall()}
-    assert v == 27
+    assert v == MAX_SCHEMA_VERSION
     assert "icon_name" in cols
     assert "icon_url" in cols
     assert "skill_package_id" in cols
