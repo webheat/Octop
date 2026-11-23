@@ -42,6 +42,7 @@ type VideoJob struct {
 // leave Targets empty and continue to expose VideoURL as before.
 type VideoOutput struct {
 	ID string `json:"id"`
+	Platform string `json:"platform,omitempty"`
 	Filename string `json:"filename"`
 	Width int `json:"width"`
 	Height int `json:"height"`
@@ -53,6 +54,7 @@ type VideoOutput struct {
 
 type VideoTargetRequest struct {
 	ID string `json:"id"`
+	Platform string `json:"platform,omitempty"`
 	Profile string `json:"profile,omitempty"`
 	Width int `json:"width"`
 	Height int `json:"height"`
@@ -457,7 +459,7 @@ func (m *videoManager) startWithTargets(token, project string, targets []VideoTa
 		return VideoJob{}, videoErr("INTERNAL")
 	}
 	rec := &videoJobRecord{Job: VideoJob{ID: id, ProjectID: project, OwnerID: owner, Name: "视频", State: "preparing", UpdatedAt: time.Now().Unix()}, ScriptHash: scriptHash, Targets: append([]VideoTargetRequest(nil), targets...)}
-	for _, t := range targets { rec.Job.Targets = append(rec.Job.Targets, VideoOutput{ID:t.ID, Filename:t.Filename, Width:t.Width, Height:t.Height, FPS:t.FPS, Status:"queued"}) }
+	for _, t := range targets { rec.Job.Targets = append(rec.Job.Targets, VideoOutput{ID:t.ID, Platform:t.Platform, Filename:t.Filename, Width:t.Width, Height:t.Height, FPS:t.FPS, Status:"queued"}) }
 	m.jobs[id] = rec
 	m.active = id
 	m.persistLocked(rec)

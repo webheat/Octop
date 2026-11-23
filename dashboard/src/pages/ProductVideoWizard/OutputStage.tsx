@@ -31,6 +31,12 @@ import {
 import { useTranslation } from "react-i18next";
 import styles from "./index.module.less";
 import outputStyles from "./OutputStage.module.less";
+import {
+  PLATFORM_KEYS,
+  PLATFORM_RENDER_PROFILES,
+  RENDER_PROFILE_SIZES,
+  platformKeyForLabel,
+} from "./platforms";
 
 function nativeStage(job: DesktopVideoJob) {
   return job.state === "downloading" ? "preparing" : job.state;
@@ -75,11 +81,7 @@ export interface RenderTargetStatus extends RenderTarget {
   error?: string;
 }
 
-const targetProfiles = {
-  short_vertical: { width: 1080, height: 1920 },
-  landscape: { width: 1920, height: 1080 },
-  square: { width: 1080, height: 1080 },
-} as const;
+const targetProfiles = RENDER_PROFILE_SIZES;
 
 const outputWords = {
   zh: {
@@ -141,28 +143,51 @@ function MultiPlatformOutput({
 }: Pick<OutputStageProps, "selectedPlatforms" | "outputLanguage" | "startBatch" | "batchTargets" | "downloadStudioPackage" | "saveBatch"> & { busy: boolean }) {
   const { i18n, t } = useTranslation();
   const words = outputWords[i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en"];
-  const platformKeys = ["douyin", "xiaohongshu", "channels", "kuaishou", "bilibili", "tiktok", "instagram", "youtube", "custom"];
+  const platformKeys = [...PLATFORM_KEYS, "custom"] as const;
   const platformOptions = useMemo(() => platformKeys.map((key) => ({ key, label: key === "custom" ? words.custom : t(`videoWizard.platforms.${key}`) })), [t, words.custom]);
   const [variants, setVariants] = useState<Array<{ id: string; platform: string; profile: RenderTarget["profile"]; width: number; height: number }>>([]);
   const [selected, setSelected] = useState<string[]>(selectedPlatforms);
   const custom = { width: 1080, height: 1920 };
+  // The brief stores translated platform labels ("抖音"), so a label has to be
+  // resolved back to its key before the default profile can be looked up.
+  const platformLabels = useMemo(() => Object.fromEntries(PLATFORM_KEYS.map((key) => [key, t(`videoWizard.platforms.${key}`)])) as Record<(typeof PLATFORM_KEYS)[number], string>, [t]);
+  const selectedKeys = useMemo(() => {
+    const resolved = selectedPlatforms
+      .map((label) => platformKeyForLabel(label, platformLabels))
+      .filter((key): key is (typeof PLATFORM_KEYS)[number] => key !== null);
+    // "custom" is not a real platform key; it carries its own entry below.
+    return resolved.length > 0
+      ? resolved
+      : (selectedPlatforms.filter((label) => label === words.custom) as unknown as (typeof PLATFORM_KEYS)[number][]);
+  }, [selectedPlatforms.join("|"), platformLabels, words.custom]);
   useEffect(() => {
     setSelected(selectedPlatforms);
-    const selectedKeys = platformOptions.filter(({ label }) => selectedPlatforms.includes(label)).map(({ key }) => key);
     setVariants((current) => {
-      const kept = current.filter((variant) => selectedKeys.includes(variant.platform));
+      const kept = current.filter((variant) => selectedKeys.includes(variant.platform as (typeof PLATFORM_KEYS)[number]) || variant.platform === "custom");
       const existing = new Set(kept.map((variant) => variant.platform));
-      const additions = selectedKeys.filter((key) => !existing.has(key)).map((key) => key === "custom"
-        ? { id: "custom-custom", platform: key, profile: "custom" as const, ...custom }
-        : { id: `${key}-short_vertical`, platform: key, profile: "short_vertical" as const, ...targetProfiles.short_vertical });
-      return [...kept, ...additions];
+      const additions = selectedKeys.filter((key) => !existing.has(key)).map((key) => {
+        // Each platform gets its own default profile — a YouTube deliverable
+        // must not silently render as a 1080x1920 vertical clip.
+        const profile = PLATFORM_RENDER_PROFILES[key];
+        const dimensions = profile === "custom" ? custom : targetProfiles[profile];
+        return { id: `${key}-${profile}`, platform: key, profile, ...dimensions };
+      });
+      const customAddition = selectedPlatforms.includes(words.custom) && !existing.has("custom")
+        ? [{ id: "custom-custom", platform: "custom", profile: "custom" as const, ...custom }]
+        : [];
+      return [...kept, ...additions, ...customAddition];
     });
-  }, [selectedPlatforms.join("|")]);
+  }, [selectedKeys.join("|"), selectedPlatforms.join("|"), words.custom]);
   const available = platformOptions.filter(({ label }) => selected.includes(label));
-  const addVariant = (platform: string, profile: RenderTarget["profile"] = "short_vertical") => {
-    const size = profile === "custom" ? custom : targetProfiles[profile as keyof typeof targetProfiles];
+  const addVariant = (platform: string, profile?: RenderTarget["profile"]) => {
+    // A newly added variant follows the platform's own default unless the user
+    // picks a format explicitly.
+    const resolved = profile ?? (platform === "custom"
+      ? "custom"
+      : PLATFORM_RENDER_PROFILES[platform as keyof typeof PLATFORM_RENDER_PROFILES] ?? "short_vertical");
+    const size = resolved === "custom" ? custom : targetProfiles[resolved as keyof typeof targetProfiles];
     const dimensions = size ?? custom;
-    setVariants((current) => [...current, { id: `${platform}-${Date.now()}-${current.length}`, platform, profile, width: dimensions.width, height: dimensions.height }]);
+    setVariants((current) => [...current, { id: `${platform}-${resolved}-${Date.now()}-${current.length}`, platform, profile: resolved, width: dimensions.width, height: dimensions.height }]);
   };
   const runBatch = async () => {
     if (!startBatch || variants.length === 0) return;
@@ -280,7 +305,9 @@ export function OutputStage({
   const nativeTargets: RenderTargetStatus[] = batchTargets ?? (desktopJob?.targets ?? []).map((target) => {
     return {
       id: target.id,
-      platform: target.filename,
+      // The bridge reports the platform key it was given; the filename is only
+      // a fallback for jobs started before the field existed.
+      platform: target.platform ?? target.filename,
       profile: "custom",
       width: target.width,
       height: target.height,

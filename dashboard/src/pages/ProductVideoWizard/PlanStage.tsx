@@ -19,37 +19,11 @@ import type {
 import { joinPlatforms, splitPlatforms, type VideoBrief } from "./brief";
 import { useTranslation } from "react-i18next";
 import styles from "./index.module.less";
-
-/** Platforms offered as checkboxes, in display order. */
-const PLATFORM_KEYS = [
-  "douyin",
-  "xiaohongshu",
-  "channels",
-  "kuaishou",
-  "bilibili",
-  "tiktok",
-  "instagram",
-  "youtube",
-] as const;
-
-/** Aspect ratio a platform expects for short-form video. */
-type VideoFormat = VideoPlanRequest["format"];
-
-/**
- * Vertical-first apps take 9:16; long-form video sites take 16:9. Kept in one
- * place so the ratio picker can follow the platform selection instead of
- * silently producing a single ratio for a mixed list.
- */
-const PLATFORM_FORMATS: Record<(typeof PLATFORM_KEYS)[number], VideoFormat> = {
-  douyin: "portrait",
-  xiaohongshu: "portrait",
-  channels: "portrait",
-  kuaishou: "portrait",
-  bilibili: "landscape",
-  tiktok: "portrait",
-  instagram: "portrait",
-  youtube: "landscape",
-};
+import {
+  PLATFORM_FORMATS,
+  PLATFORM_KEYS,
+  type VideoFormat,
+} from "./platforms";
 
 const FORMAT_LABELS: Record<VideoFormat, string> = {
   portrait: "9:16",

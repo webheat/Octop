@@ -36,6 +36,7 @@ export interface DesktopVideoJob {
 
 export interface DesktopVideoOutput {
   id: string;
+  platform?: string;
   filename: string;
   width: number;
   height: number;
@@ -47,6 +48,7 @@ export interface DesktopVideoOutput {
 
 export interface DesktopVideoTargetRequest {
   id: string;
+  platform?: string;
   profile?: "short_vertical" | "landscape" | "square" | "custom";
   width: number;
   height: number;
