@@ -124,6 +124,101 @@
   gap: 12px;
   margin-top: 16px;
 }
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(280px, 1.3fr) minmax(
+      240px,
+      1fr
+    );
+  gap: 12px;
+  align-items: start;
+}
+.workbenchAssets,
+.workbenchScenes,
+.workbenchProperties {
+  min-width: 0;
+}
+.workbenchPreview {
+  margin-bottom: 12px;
+}
+.assetList,
+.sceneList {
+  display: grid;
+  gap: 7px;
+  max-height: 440px;
+  overflow: auto;
+  margin-top: 10px;
+}
+.workbenchAsset,
+.sceneRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--fn-border, #e8e8e8);
+  border-radius: 7px;
+  background: var(--fn-bg-container, #fff);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workbenchAsset span,
+.sceneRow > span:nth-child(2) {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbenchAsset:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sceneRow[aria-pressed="true"] {
+  border-color: var(--fn-color-primary, #f04e70);
+}
+.propertyForm {
+  width: 100%;
+}
+.propertyForm label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.propertyForm :global(.ant-input-number),
+.propertyForm :global(.octop-input-number) {
+  width: 100%;
+}
+.workbenchMobileTabs {
+  display: none;
+}
+@media (max-width: 900px) {
+  .workbenchMobileTabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+  .workbenchMobileTabs button {
+    border: 1px solid var(--fn-border, #e8e8e8);
+    border-radius: 6px;
+    background: var(--fn-bg-container, #fff);
+    padding: 7px 10px;
+    color: inherit;
+  }
+  .workbenchMobileTabs button[aria-selected="true"] {
+    border-color: var(--fn-color-primary, #f04e70);
+  }
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+  .workbench > :global(.ant-card):not([data-mobile-active="true"]) {
+    display: none;
+  }
+  .assetList,
+  .sceneList {
+    max-height: 220px;
+  }
+}
 .assetTile {
   min-width: 0;
   display: grid;

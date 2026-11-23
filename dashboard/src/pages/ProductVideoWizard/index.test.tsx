@@ -27,6 +27,7 @@ const api = vi.hoisted(() => ({
   getStoryboard: vi.fn(),
   saveStoryboard: vi.fn(),
   narrationOptions: vi.fn(),
+  bgmOptions: vi.fn(),
   downloadStoryboardPackage: vi.fn(),
   downloadAsset: vi.fn(),
 }));
@@ -203,6 +204,7 @@ function renderWizard(path = "/product-library/video-wizard", state?: unknown) {
 describe("product video wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    api.saveStoryboard.mockReset();
     desktopJobs.bridgeAvailable = false;
     desktopJobs.environmentSupported = false;
     desktopJobs.environmentStatus = {
@@ -221,6 +223,7 @@ describe("product video wizard", () => {
       modes: ["off", "local"],
       voices: [],
     });
+    api.bgmOptions.mockResolvedValue({ items: [], default: "" });
     api.downloadAsset.mockResolvedValue(new Blob(["image"]));
     api.createProject.mockResolvedValue(project);
     api.updateProduct.mockImplementation(async (_id, body) => ({
@@ -270,6 +273,109 @@ describe("product video wizard", () => {
     );
   }, 15000);
 
+  it("advances a new project from product selection to a confirmed package", async () => {
+    const user = userEvent.setup();
+    api.createProject.mockImplementationOnce(async () => {
+      api.projects.mockResolvedValue({ items: [project] });
+      return project;
+    });
+    api.generateStoryboard.mockImplementationOnce(async () => {
+      api.getStoryboard.mockResolvedValue(savedDraft);
+      return { draft: savedDraft, generator: "llm" };
+    });
+    api.saveStoryboard.mockImplementationOnce(async (_id, body) => ({
+      ...savedDraft,
+      ...body,
+    }));
+    api.downloadStoryboardPackage.mockResolvedValue(new Blob(["zip"]));
+
+    renderWizard();
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "videoWizard.product" }),
+      "p1",
+    );
+    await screen.findByText("front.jpg");
+    await user.click(screen.getByRole("button", { name: "videoWizard.next" }));
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.generate" }),
+    );
+    await screen.findByRole("button", {
+      name: "videoWizard.confirmContinue",
+    });
+    expect(api.getStoryboard).not.toHaveBeenCalled();
+    const confirm = await screen.findByRole("button", {
+      name: "videoWizard.confirmContinue",
+    });
+    expect(
+      screen.queryByRole("button", { name: "videoWizard.downloadPackage" }),
+    ).not.toBeInTheDocument();
+    await user.click(confirm);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "videoWizard.downloadPackage",
+      }),
+    );
+
+    expect(api.createProject).toHaveBeenCalledWith({
+      product_id: "p1",
+      name: expect.stringContaining(product.name),
+      asset_ids: [sceneAsset.id],
+    });
+    expect(api.saveStoryboard).toHaveBeenCalledWith(
+      project.id,
+      expect.objectContaining({ confirmed: true }),
+    );
+    expect(api.downloadStoryboardPackage).toHaveBeenCalledWith(project.id);
+    expect(desktopJobs.start).not.toHaveBeenCalled();
+  }, 15000);
+
+  it("restores the soundtrack choice and saves a replacement track", async () => {
+    const user = userEvent.setup();
+    api.projects.mockResolvedValue({ items: [project] });
+    api.getStoryboard.mockResolvedValue({
+      ...savedDraft,
+      bgm_enabled: true,
+      bgm_id: "upbeat",
+    });
+    api.bgmOptions.mockResolvedValue({
+      default: "light",
+      items: [
+        { id: "light", name: "Light" },
+        { id: "upbeat", name: "Upbeat", bpm: 120 },
+      ],
+    });
+    api.saveStoryboard.mockImplementationOnce(async (_id, body) => ({
+      ...savedDraft,
+      ...body,
+    }));
+
+    renderWizard("/product-library/video-wizard?project=project1");
+    await screen.findByText("videoWizard.storyboardTitle");
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.previous" }),
+    );
+    const trackPicker = await screen.findByRole("combobox", {
+      name: "videoWizard.bgmTrack",
+    });
+    expect(trackPicker).toHaveValue("upbeat");
+    await user.selectOptions(trackPicker, "light");
+    await user.click(
+      screen.getByRole("button", { name: /videoWizard.confirm$/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.saveChanges" }),
+    );
+
+    expect(api.saveStoryboard).toHaveBeenCalledWith(
+      project.id,
+      expect.objectContaining({
+        confirmed: false,
+        bgm_enabled: true,
+        bgm_id: "light",
+      }),
+    );
+  });
+
   it("restores a saved draft, saves edits, confirms, then exports the confirmed package", async () => {
     const user = userEvent.setup();
     api.assets.mockResolvedValue({ items: [sceneAsset, foreignAsset] });
@@ -285,7 +391,10 @@ describe("product video wizard", () => {
     api.downloadStoryboardPackage.mockResolvedValue(new Blob(["zip"]));
     renderWizard("/product-library/video-wizard?project=project1");
     await screen.findByText("videoWizard.storyboardTitle");
-    expect(screen.getAllByDisplayValue("Sample product")).toHaveLength(2);
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.advancedEdit" }),
+    );
+    expect(screen.getAllByDisplayValue("Sample product")).toHaveLength(1);
     expect(screen.queryByText("foreign.jpg")).not.toBeInTheDocument();
     const subtitle = screen.getAllByRole("textbox", {
       name: "videoWizard.sceneSubtitle",
@@ -687,7 +796,7 @@ describe("product video wizard", () => {
     await user.click(
       screen.getByRole("button", { name: "videoWizard.previous" }),
     );
-    const toggle = await screen.findByRole("checkbox", {
+    await screen.findByRole("checkbox", {
       name: "videoWizard.narration",
     });
     // The toggle unlocks once the account's capabilities arrive.

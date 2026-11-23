@@ -31,10 +31,32 @@ export interface DesktopVideoJob {
   errorCode?: string;
   videoUrl?: string;
   updatedAt: number;
+  targets?: DesktopVideoOutput[];
+}
+
+export interface DesktopVideoOutput {
+  id: string;
+  filename: string;
+  width: number;
+  height: number;
+  fps: number;
+  status: "queued" | "rendering" | "completed" | "failed";
+  errorCode?: string;
+  videoUrl?: string;
+}
+
+export interface DesktopVideoTargetRequest {
+  id: string;
+  profile?: "short_vertical" | "landscape" | "square" | "custom";
+  width: number;
+  height: number;
+  fps: number;
+  filename: string;
 }
 
 export interface DesktopVideoBridge {
   version: number;
+  outputBatchVersion?: number;
   /** Explicit opt-out for shells started with OCTOP_DESKTOP_MINIMAL=0. */
   minimalMode?: boolean;
   environmentVersion?: number;
@@ -42,11 +64,13 @@ export interface DesktopVideoBridge {
   request: <T = unknown>(
     action:
       | "start"
+      | "start_variants"
       | "list"
       | "get"
       | "cancel"
       | "retry"
       | "save"
+      | "save_batch"
       | "environment_check"
       | "environment_verify"
       | "environment_install"
@@ -71,6 +95,7 @@ export interface DesktopVideoEnvironmentStatus {
   errorCode?: string;
   checkedAt?: number;
   requiresInstall?: boolean;
+  outputBatchSupported?: boolean;
 }
 
 declare global {
@@ -96,9 +121,14 @@ interface DesktopVideoJobsContextValue {
   environmentStatus: DesktopVideoEnvironmentStatus;
   jobs: DesktopVideoJob[];
   start: (projectId: string) => Promise<DesktopVideoJob>;
+  startVariants: (
+    projectId: string,
+    targets: DesktopVideoTargetRequest[],
+  ) => Promise<DesktopVideoJob>;
   cancel: (jobId: string) => Promise<DesktopVideoJob>;
   retry: (jobId: string) => Promise<DesktopVideoJob>;
   save: (jobId: string) => Promise<boolean>;
+  saveBatch: (jobId: string) => Promise<boolean>;
   checkEnvironment: (force?: boolean) => Promise<DesktopVideoEnvironmentStatus>;
   verifyEnvironment: () => Promise<DesktopVideoEnvironmentStatus>;
   installEnvironment: () => Promise<DesktopVideoEnvironmentStatus>;
@@ -117,9 +147,11 @@ const DesktopVideoJobsContext = createContext<DesktopVideoJobsContextValue>({
   environmentStatus: { state: "unknown", stage: null, progress: null },
   jobs: [],
   start: missingBridge,
+  startVariants: missingBridge,
   cancel: missingBridge,
   retry: missingBridge,
   save: missingBridge,
+  saveBatch: missingBridge,
   checkEnvironment: missingBridge,
   verifyEnvironment: missingBridge,
   installEnvironment: missingBridge,
@@ -214,11 +246,13 @@ export function DesktopVideoJobsProvider({
     async <T,>(
       action:
         | "start"
+        | "start_variants"
         | "list"
         | "get"
         | "cancel"
         | "retry"
         | "save"
+        | "save_batch"
         | "environment_check"
         | "environment_verify"
         | "environment_install"
@@ -274,7 +308,7 @@ export function DesktopVideoJobsProvider({
 
   const updateJob = useCallback(
     async (
-      action: "start" | "cancel" | "retry",
+      action: "start" | "start_variants" | "cancel" | "retry",
       payload: Record<string, unknown>,
     ) => {
       const job = await call<DesktopVideoJob>(action, payload);
@@ -296,6 +330,11 @@ export function DesktopVideoJobsProvider({
     (projectId: string) => updateJob("start", { projectId }),
     [updateJob],
   );
+  const startVariants = useCallback(
+    (projectId: string, targets: DesktopVideoTargetRequest[]) =>
+      updateJob("start_variants", { projectId, targets }),
+    [updateJob],
+  );
   const cancel = useCallback(
     (jobId: string) => updateJob("cancel", { jobId }),
     [updateJob],
@@ -307,6 +346,13 @@ export function DesktopVideoJobsProvider({
   const save = useCallback(
     async (jobId: string) => {
       const result = await call<{ saved: boolean }>("save", { jobId });
+      return result.saved;
+    },
+    [call],
+  );
+  const saveBatch = useCallback(
+    async (jobId: string) => {
+      const result = await call<{ saved: boolean }>("save_batch", { jobId });
       return result.saved;
     },
     [call],
@@ -447,9 +493,11 @@ export function DesktopVideoJobsProvider({
           : { state: "unknown" as const, stage: null, progress: null },
       jobs: jobsOwnerId === userId ? jobs : [],
       start,
+      startVariants,
       cancel,
       retry,
       save,
+      saveBatch,
       checkEnvironment,
       verifyEnvironment,
       installEnvironment,
@@ -469,6 +517,7 @@ export function DesktopVideoJobsProvider({
       cancel,
       retry,
       save,
+      saveBatch,
       checkEnvironment,
       verifyEnvironment,
       installEnvironment,

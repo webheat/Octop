@@ -77,8 +77,14 @@ export function detectBrowser() {
   return null;
 }
 
+export const RENDER_PROFILES = Object.freeze({
+  short_vertical: Object.freeze({ width: 1080, height: 1920, fps: 30 }),
+  landscape: Object.freeze({ width: 1920, height: 1080, fps: 30 }),
+  square: Object.freeze({ width: 1080, height: 1080, fps: 30 }),
+});
+
 function parseArgs(argv) {
-  const args = { project: null, out: null, quality: "prod", scale: null };
+  const args = { project: null, out: null, quality: "prod", scale: null, profile: null, width: null, height: null, fps: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -86,11 +92,15 @@ function parseArgs(argv) {
     else if (arg === "--out" || arg === "-o") args.out = next();
     else if (arg === "--quality" || arg === "-q") args.quality = next();
     else if (arg === "--scale") args.scale = Number(next());
+    else if (arg === "--profile") args.profile = next();
+    else if (arg === "--width") args.width = Number(next());
+    else if (arg === "--height") args.height = Number(next());
+    else if (arg === "--fps") args.fps = Number(next());
   }
   return args;
 }
 
-export async function renderProject({ projectDir, outPath, quality = "prod", onProgress = () => {}, onStage = () => {}, cancelSignal, trustedTemplate = false, browserExecutable: selectedBrowser = null }) {
+export async function renderProject({ projectDir, outPath, quality = "prod", profile = null, width = null, height = null, fps = null, onProgress = () => {}, onStage = () => {}, cancelSignal, trustedTemplate = false, browserExecutable: selectedBrowser = null }) {
   const { bundle } = await import("@remotion/bundler");
   const { ensureBrowser, renderMedia, selectComposition } = await import("@remotion/renderer");
   const resolvedProjectDir = path.resolve(projectDir);
@@ -104,6 +114,13 @@ export async function renderProject({ projectDir, outPath, quality = "prod", onP
   // touch script.json: the desktop client verifies the script hash separately.
   const audioPlan = loadAudioPlan(resolvedProjectDir);
   const mergedScript = mergeAudioPlan(script, audioPlan, resolvedProjectDir);
+  const preset = profile ? RENDER_PROFILES[profile] : null;
+  if (profile && !preset) throw new Error(`Unknown render profile: ${profile}`);
+  const dimensions = { width: width ?? preset?.width, height: height ?? preset?.height, fps: fps ?? preset?.fps };
+  for (const [key, value] of Object.entries(dimensions)) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 4096)) throw new Error(`Invalid render ${key}`);
+  }
+  const renderScript = { ...mergedScript, ...Object.fromEntries(Object.entries(dimensions).filter(([, value]) => value !== undefined)) };
 
   const resolvedOutPath = path.resolve(
     outPath ?? path.join(resolvedProjectDir, "out", "final.mp4"),
@@ -166,7 +183,7 @@ export async function renderProject({ projectDir, outPath, quality = "prod", onP
   });
   console.log(`[render] bundle: ${bundleLocation}`);
 
-  const inputProps = { script: mergedScript };
+  const inputProps = { script: renderScript };
   const composition = await selectComposition({
     serveUrl: bundleLocation,
     id: "Video",
@@ -215,7 +232,7 @@ async function main() {
     console.error("usage: node render.mjs --project <dir> [--out file.mp4] [--quality draft|prod]");
     process.exit(2);
   }
-  await renderProject({ projectDir: args.project, outPath: args.out, quality: args.quality });
+  await renderProject({ projectDir: args.project, outPath: args.out, quality: args.quality, profile: args.profile, width: args.width, height: args.height, fps: args.fps });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

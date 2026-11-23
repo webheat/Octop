@@ -1,37 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  ConfigProvider,
-  Empty,
-  Input,
-  InputNumber,
-  Progress,
-  Radio,
-  Select,
-  Space,
-  Spin,
-  Tag,
-  Typography,
-  Upload,
-} from "antd";
+import { Alert, Button, ConfigProvider, Empty, Space, Spin } from "antd";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
-  Clock3,
   Circle,
   Download,
-  Image as ImageIcon,
-  LoaderCircle,
-  Play,
-  RefreshCw,
   Sparkles,
-  Upload as UploadIcon,
-  X,
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -54,55 +30,22 @@ import PageShell from "../../layouts/PageShell";
 import {
   isActiveDesktopVideoJob,
   useDesktopVideoJobs,
-  type DesktopVideoJob,
 } from "../../context/DesktopVideoJobsContext";
 import { message } from "../../utils/antdMessage";
 import {
   decodeVideoBrief,
   EMPTY_VIDEO_BRIEF,
   encodeVideoBrief,
-  joinPlatforms,
   splitPlatforms,
   type VideoBrief,
 } from "./brief";
 
-/** Platforms offered as checkboxes, in display order. */
-const PLATFORM_KEYS = [
-  "douyin",
-  "xiaohongshu",
-  "channels",
-  "kuaishou",
-  "bilibili",
-  "tiktok",
-  "instagram",
-  "youtube",
-] as const;
+import { ProductStage } from "./ProductStage";
+import { PlanStage } from "./PlanStage";
+import { StoryboardStage } from "./StoryboardStage";
+import { EnvironmentPanel, OutputStage } from "./OutputStage";
+import { exportName, mediaType } from "./sceneAssets";
 import styles from "./index.module.less";
-
-/** Aspect ratio a platform expects for short-form video. */
-type VideoFormat = VideoPlanRequest["format"];
-
-/**
- * Vertical-first apps take 9:16; long-form video sites take 16:9. Kept in one
- * place so the ratio picker can follow the platform selection instead of
- * silently producing a single ratio for a mixed list.
- */
-const PLATFORM_FORMATS: Record<(typeof PLATFORM_KEYS)[number], VideoFormat> = {
-  douyin: "portrait",
-  xiaohongshu: "portrait",
-  channels: "portrait",
-  kuaishou: "portrait",
-  bilibili: "landscape",
-  tiktok: "portrait",
-  instagram: "portrait",
-  youtube: "landscape",
-};
-
-const FORMAT_LABELS: Record<VideoFormat, string> = {
-  portrait: "9:16",
-  landscape: "16:9",
-  square: "1:1",
-};
 
 const initialRequest: VideoPlanRequest = {
   instructions: "",
@@ -125,25 +68,6 @@ function nativeErrorMessage(error: unknown, t: (key: string) => string) {
       ? String((error as { code?: unknown }).code ?? "INTERNAL")
       : "INTERNAL";
   return t(`videoWizard.desktopErrors.${code}`);
-}
-
-function nativeStage(job: DesktopVideoJob) {
-  return job.state === "downloading" ? "preparing" : job.state;
-}
-
-function mediaType(asset: ProductSnapshotAsset) {
-  return asset.media_type.startsWith("image/")
-    ? "image"
-    : asset.media_type.startsWith("video/")
-    ? "video"
-    : null;
-}
-
-function exportName(asset: ProductSnapshotAsset, index: number) {
-  const safe = asset.filename
-    .replace(/[^A-Za-z0-9._-]+/g, "_")
-    .replace(/^[._]+|[._]+$/g, "");
-  return `${asset.id}-${safe || `asset-${index}`}`;
 }
 
 function isNotFound(error: unknown) {
@@ -225,6 +149,10 @@ export default function ProductVideoWizardPage() {
   const requestVersion = useRef(0);
   const productIdRef = useRef<string | null>(null);
   const tRef = useRef(t);
+  const generatedProjectRoute = useRef<{
+    id: string;
+    user: typeof userId;
+  } | null>(null);
   tRef.current = t;
 
   // Desktop shell: the server-backed wizard is retired (PRD §3.7). Material
@@ -287,6 +215,7 @@ export default function ProductVideoWizardPage() {
     () => () => {
       bgmPreviewRef.current?.pause();
       bgmPreviewRef.current = null;
+      cleanUrls();
     },
     [],
   );
@@ -312,6 +241,14 @@ export default function ProductVideoWizardPage() {
   };
 
   useEffect(() => {
+    const generatedRoute = generatedProjectRoute.current;
+    generatedProjectRoute.current = null;
+    if (
+      generatedRoute?.id === requestedProjectId &&
+      generatedRoute?.user === userId
+    ) {
+      return;
+    }
     let active = true;
     setLoading(true);
     setLoadFailed(false);
@@ -415,12 +352,7 @@ export default function ProductVideoWizardPage() {
       });
     return () => {
       active = false;
-      cleanUrls();
     };
-    // ``location.key`` is deliberately absent: it changes on every
-    // navigation, including the one that puts the freshly generated project
-    // into the URL. Depending on it would tear the whole wizard down and
-    // rebuild it right after the picture was generated.
   }, [userId, requestedProjectId, requestedProductId]);
 
   useEffect(() => {
@@ -516,16 +448,9 @@ export default function ProductVideoWizardPage() {
   const coverAsset = coverScene?.asset
     ? assetByExportName.get(coverScene.asset)
     : undefined;
-  const nativeStages = ["preparing", "rendering", "saving"] as const;
-  const currentNativeStage = desktopJob
-    ? nativeStages.indexOf(
-        nativeStage(desktopJob) as (typeof nativeStages)[number],
-      )
-    : -1;
   const isNativeActive = Boolean(
     desktopJob && isActiveDesktopVideoJob(desktopJob),
   );
-  const isNativeComplete = desktopJob?.state === "completed";
 
   const pickProduct = (id: string) => {
     requestVersion.current += 1;
@@ -562,70 +487,38 @@ export default function ProductVideoWizardPage() {
       current ? { ...current, confirmed: false } : current,
     );
   };
-  const platformOptions = useMemo(() => {
-    const presets = PLATFORM_KEYS.map((key) =>
-      t(`videoWizard.platforms.${key}`),
+  const invalidateConfirmation = () => {
+    setSaved(false);
+    setDraft((current) =>
+      current ? { ...current, confirmed: false } : current,
     );
-    const known = new Set(presets);
-    // Keep values stored by older free-text briefs selectable so nothing is lost.
-    const extra = splitPlatforms(brief.platform).filter(
-      (value) => !known.has(value),
-    );
-    return [...presets, ...extra].map((value) => ({ value, label: value }));
-  }, [t, brief.platform]);
+  };
 
-  /** Ratio buckets for the platforms currently selected. */
-  const platformFormatGroups = useMemo(() => {
-    const selected = new Set(splitPlatforms(brief.platform));
-    const groups: Record<VideoFormat, string[]> = {
-      portrait: [],
-      landscape: [],
-      square: [],
-    };
-    (Object.keys(PLATFORM_FORMATS) as (typeof PLATFORM_KEYS)[number][]).forEach(
-      (key) => {
-        const label = t(`videoWizard.platforms.${key}`);
-        if (selected.has(label)) groups[PLATFORM_FORMATS[key]].push(label);
-      },
-    );
-    return groups;
-  }, [brief.platform, t]);
+  const changeNarrationEnabled = (enabled: boolean) => {
+    setNarrationEnabled(enabled);
+    invalidateConfirmation();
+  };
 
-  const requiredFormats = useMemo(
-    () =>
-      (Object.keys(platformFormatGroups) as VideoFormat[]).filter(
-        (format) => platformFormatGroups[format].length > 0,
-      ),
-    [platformFormatGroups],
-  );
+  const changeNarrationVoice = (voice: string) => {
+    setNarrationVoice(voice);
+    invalidateConfirmation();
+  };
 
-  /**
-   * One ratio → tell the user it followed their platforms. Several ratios →
-   * spell out which platform wants which ratio, so nobody ships a 9:16 file to
-   * a 16:9 site again.
-   */
-  const formatNote = useMemo(() => {
-    if (requiredFormats.length === 0) return "";
-    if (requiredFormats.length === 1) {
-      return t("videoWizard.formatAuto", {
-        format: FORMAT_LABELS[requiredFormats[0]],
-      });
+  const changeBgmEnabled = (enabled: boolean) => {
+    setBgmEnabled(enabled);
+    if (!enabled) {
+      bgmPreviewRef.current?.pause();
+      bgmPreviewRef.current = null;
+      setBgmPreview("");
     }
-    const groups = requiredFormats
-      .map((format) =>
-        t("videoWizard.formatConflictGroup", {
-          format: FORMAT_LABELS[format],
-          platforms: platformFormatGroups[format].join(
-            t("videoWizard.platformSeparator"),
-          ),
-        }),
-      )
-      .join(t("videoWizard.formatGroupSeparator"));
-    return t("videoWizard.formatConflict", {
-      groups,
-      current: FORMAT_LABELS[request.format],
-    });
-  }, [requiredFormats, platformFormatGroups, request.format, t]);
+    invalidateConfirmation();
+  };
+
+  const changeBgmId = (id: string) => {
+    setBgmId(id);
+    invalidateConfirmation();
+  };
+
   const changeRequest = (patch: Partial<VideoPlanRequest>) => {
     setRequest((current) => ({ ...current, ...patch }));
     setSaved(false);
@@ -778,6 +671,9 @@ export default function ProductVideoWizardPage() {
       // picture leaves them alone; keep the local copy as the source of truth.
       setSaved(true);
       setStep(3);
+      if (requestedProjectId !== activeProject.id) {
+        generatedProjectRoute.current = { id: activeProject.id, user: userId };
+      }
       navigate(
         `/product-library/video-wizard?project=${encodeURIComponent(
           activeProject.id,
@@ -794,7 +690,7 @@ export default function ProductVideoWizardPage() {
     }
   };
 
-  const updateScene = (index: number, patch: Partial<StoryboardScene>) => {
+  const updateScenes = (scenes: StoryboardScene[]) => {
     setDraft((current) =>
       current
         ? {
@@ -802,9 +698,7 @@ export default function ProductVideoWizardPage() {
             confirmed: false,
             script: {
               ...current.script,
-              scenes: current.script.scenes.map((scene, i) =>
-                i === index ? { ...scene, ...patch } : scene,
-              ),
+              scenes,
             },
           }
         : current,
@@ -871,6 +765,33 @@ export default function ProductVideoWizardPage() {
       setError(nativeErrorMessage(nativeError, t));
     } finally {
       setNativeBusy(false);
+    }
+  };
+
+  const startBatch = async (targets: import("./OutputStage").RenderTarget[]) => {
+    if (!project || !environmentReady) return;
+    setNativeBusy(true);
+    setError("");
+    try {
+      await desktopVideo.startVariants(project.id, targets);
+    } catch (nativeError) {
+      setError(nativeErrorMessage(nativeError, t));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const saveBatch = async () => {
+    if (!desktopJob) return;
+    setNativeSaving(true);
+    setError("");
+    try {
+      const savedBatch = await desktopVideo.saveBatch(desktopJob.id);
+      if (savedBatch) message.success(t("videoWizard.videoSaved"));
+    } catch (nativeError) {
+      setError(nativeErrorMessage(nativeError, t));
+    } finally {
+      setNativeSaving(false);
     }
   };
 
@@ -1042,134 +963,6 @@ export default function ProductVideoWizardPage() {
     setStep(next);
   };
 
-  const environmentPanel = environmentSupported && (
-    <Card
-      className={styles.environmentCard}
-      classNames={{ body: styles.environmentBody }}
-    >
-      {environmentStatus.state === "ready" ? (
-        <>
-          <Alert
-            type="success"
-            showIcon
-            message={t("videoWizard.environment.ready")}
-            description={t("videoWizard.environment.readyHint")}
-          />
-          <Button
-            loading={environmentBusy}
-            disabled={environmentBusy}
-            onClick={() => void recheckEnvironment()}
-          >
-            {t("videoWizard.environment.recheck")}
-          </Button>
-        </>
-      ) : environmentStatus.state === "checking" ||
-        environmentStatus.state === "installing" ||
-        environmentStatus.state === "verifying" ||
-        environmentStatus.state === "unknown" ? (
-        <>
-          <div className={styles.environmentLoading}>
-            <Spin />
-            <div>
-              <strong>
-                {t(
-                  environmentStatus.state === "verifying"
-                    ? "videoWizard.environment.verifying"
-                    : environmentStatus.state === "installing"
-                    ? "videoWizard.environment.installing"
-                    : "videoWizard.environment.checking",
-                )}
-              </strong>
-              {environmentStatus.stage && (
-                <span>
-                  {t(
-                    `videoWizard.environment.stages.${environmentStatus.stage}`,
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-          {environmentStatus.progress !== null && (
-            <Progress
-              percent={Math.round(
-                Math.max(0, Math.min(1, environmentStatus.progress)) * 100,
-              )}
-              status="active"
-            />
-          )}
-        </>
-      ) : environmentStatus.requiresInstall ||
-        ["RUNTIME_MISSING", "BROWSER_MISSING"].includes(
-          environmentStatus.errorCode ?? "",
-        ) ? (
-        <>
-          <Alert
-            type="warning"
-            showIcon
-            message={t("videoWizard.environment.installTitle")}
-            description={t("videoWizard.environment.installHint")}
-          />
-          <ol className={styles.environmentSteps}>
-            <li>{t("videoWizard.environment.installStepDownload")}</li>
-            <li>{t("videoWizard.environment.installStepInstall")}</li>
-            <li>{t("videoWizard.environment.installStepRecheck")}</li>
-          </ol>
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={environmentBusy}
-              disabled={environmentBusy}
-              onClick={() => void installEnvironment()}
-            >
-              {t("videoWizard.environment.downloadComponents")}
-            </Button>
-            <Button
-              loading={environmentBusy}
-              disabled={environmentBusy}
-              onClick={() => void recheckEnvironment()}
-            >
-              {t("videoWizard.environment.recheck")}
-            </Button>
-          </Space>
-        </>
-      ) : (
-        <>
-          <Alert
-            type={environmentStatus.state === "failed" ? "error" : "info"}
-            showIcon
-            message={t(
-              environmentStatus.state === "failed"
-                ? "videoWizard.environment.verifyFailed"
-                : "videoWizard.environment.verifyTitle",
-            )}
-            description={
-              environmentStatus.errorCode
-                ? t(`videoWizard.desktopErrors.${environmentStatus.errorCode}`)
-                : t("videoWizard.environment.verifyHint")
-            }
-          />
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={environmentBusy}
-              disabled={environmentBusy}
-              onClick={() => void verifyEnvironment()}
-            >
-              {t("videoWizard.environment.verify")}
-            </Button>
-            <Button
-              loading={environmentBusy}
-              disabled={environmentBusy}
-              onClick={() => void recheckEnvironment()}
-            >
-              {t("videoWizard.environment.recheck")}
-            </Button>
-          </Space>
-        </>
-      )}
-    </Card>
-  );
-
   return (
     <PageShell
       title={t("videoWizard.title")}
@@ -1258,770 +1051,68 @@ export default function ProductVideoWizardPage() {
           ) : (
             <>
               {step === 0 && (
-                <section>
-                  <div className={styles.sectionHeader}>
-                    <div>
-                      <Typography.Title level={3}>
-                        {t("videoWizard.chooseTitle")}
-                      </Typography.Title>
-                      <Typography.Text type="secondary">
-                        {t("videoWizard.chooseHint")}
-                      </Typography.Text>
-                    </div>
-                  </div>
-                  <Card className={styles.summary}>
-                    <Space wrap>
-                      <Select
-                        aria-label={t("videoWizard.product")}
-                        placeholder={t("videoWizard.chooseProduct")}
-                        value={product?.id}
-                        onChange={pickProduct}
-                        disabled={busy || uploadBusy}
-                        options={products.map((item) => ({
-                          value: item.id,
-                          label: `${item.name}${
-                            item.model ? ` · ${item.model}` : ""
-                          }`,
-                        }))}
-                        className={styles.productSelect}
-                      />
-                      {product && (
-                        <Tag>
-                          {t("videoWizard.snapshotAssets", {
-                            count: sceneAssets.length,
-                          })}
-                        </Tag>
-                      )}
-                      <Button onClick={() => navigate("/product-library")}>
-                        {t("videoWizard.backToLibrary")}
-                      </Button>
-                    </Space>
-                  </Card>
-                  {product && (
-                    <>
-                      <div className={styles.assetToolbar}>
-                        <Typography.Title level={4}>
-                          {t("videoWizard.sceneAssets")}
-                        </Typography.Title>
-                        <Space wrap>
-                          <Upload
-                            multiple
-                            accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.avif,.mp4,.webm,.mov,.m4v"
-                            beforeUpload={(file) => {
-                              if (
-                                !/\.(png|jpe?g|gif|webp|bmp|avif|mp4|webm|mov|m4v)$/i.test(
-                                  file.name,
-                                )
-                              ) {
-                                setError(t("videoWizard.unsupportedMedia"));
-                                return Upload.LIST_IGNORE;
-                              }
-                              setUploads((list) => [...list, file]);
-                              return false;
-                            }}
-                            fileList={uploads.map((file) => ({
-                              uid: (() => {
-                                let id = uploadFileIds.current.get(file);
-                                if (!id) {
-                                  id = `wizard-upload-${nextUploadFileId.current++}`;
-                                  uploadFileIds.current.set(file, id);
-                                }
-                                return id;
-                              })(),
-                              name: file.name,
-                              status: "done" as const,
-                            }))}
-                            onRemove={(file) => {
-                              setUploads((list) =>
-                                list.filter(
-                                  (item) =>
-                                    uploadFileIds.current.get(item) !==
-                                    file.uid,
-                                ),
-                              );
-                              return true;
-                            }}
-                          >
-                            <Button
-                              icon={<UploadIcon size={15} />}
-                              disabled={Boolean(project) || busy || uploadBusy}
-                            >
-                              {t("videoWizard.addAssets")}
-                            </Button>
-                          </Upload>
-                          {uploadProgress && (
-                            <Typography.Text>{uploadProgress}</Typography.Text>
-                          )}
-                          <Typography.Text type="secondary">
-                            {t("videoWizard.supportedFormats")}
-                          </Typography.Text>
-                          {!!uploads.length && (
-                            <Button
-                              loading={uploadBusy}
-                              disabled={uploadBusy}
-                              onClick={() => void uploadAssets()}
-                            >
-                              {t("videoWizard.uploadAssets")}
-                            </Button>
-                          )}
-                        </Space>
-                      </div>
-                      {project && (
-                        <Alert
-                          type="info"
-                          showIcon
-                          message={t("videoWizard.snapshotLocked")}
-                        />
-                      )}
-                      {assetLoadFailed ? (
-                        <Empty description={t("videoWizard.assetsFailed")}>
-                          <Button
-                            onClick={() => setAssetRetry((value) => value + 1)}
-                          >
-                            {t("videoWizard.loadRetry")}
-                          </Button>
-                        </Empty>
-                      ) : sceneAssets.length ? (
-                        <div className={styles.assetGrid}>
-                          {sceneAssets.map((asset) => {
-                            const checked = project
-                              ? selectedAssetIds.includes(asset.id)
-                              : selectedAssetIds.includes(asset.id);
-                            return (
-                              <button
-                                key={asset.id}
-                                type="button"
-                                className={`${styles.assetTile} ${
-                                  checked ? styles.assetSelected : ""
-                                }`}
-                                onClick={() =>
-                                  !project &&
-                                  setSelectedAssetIds((ids) =>
-                                    checked
-                                      ? ids.filter((id) => id !== asset.id)
-                                      : [...ids, asset.id],
-                                  )
-                                }
-                                disabled={
-                                  Boolean(project) || busy || uploadBusy
-                                }
-                              >
-                                <div className={styles.assetThumb}>
-                                  {imageUrls[asset.id] ? (
-                                    mediaType(asset) === "image" ? (
-                                      <img src={imageUrls[asset.id]} alt="" />
-                                    ) : (
-                                      <video
-                                        src={imageUrls[asset.id]}
-                                        muted
-                                        preload="metadata"
-                                      />
-                                    )
-                                  ) : (
-                                    <ImageIcon size={25} />
-                                  )}
-                                </div>
-                                <span>{asset.filename}</span>
-                                <Checkbox
-                                  checked={checked}
-                                  disabled={Boolean(project)}
-                                />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <Empty description={t("videoWizard.noSceneAssets")} />
-                      )}
-                      {product.selling_points.length > 0 && (
-                        <Typography.Paragraph
-                          type="secondary"
-                          className={styles.points}
-                        >
-                          {t("videoWizard.productPoints", {
-                            points: product.selling_points.join(" · "),
-                          })}
-                        </Typography.Paragraph>
-                      )}
-                    </>
-                  )}
-                </section>
+                <ProductStage
+                  products={products}
+                  product={product}
+                  project={project}
+                  sceneAssets={sceneAssets}
+                  imageUrls={imageUrls}
+                  busy={busy}
+                  uploadBusy={uploadBusy}
+                  uploadProgress={uploadProgress}
+                  uploads={uploads}
+                  uploadFileIds={uploadFileIds}
+                  nextUploadFileId={nextUploadFileId}
+                  setUploads={setUploads}
+                  setError={setError}
+                  uploadAssets={uploadAssets}
+                  assetLoadFailed={assetLoadFailed}
+                  retryAssets={() => setAssetRetry((value) => value + 1)}
+                  selectedAssetIds={selectedAssetIds}
+                  setSelectedAssetIds={setSelectedAssetIds}
+                  pickProduct={pickProduct}
+                  backToLibrary={() => navigate("/product-library")}
+                />
               )}
 
               {step === 1 && (
-                <section>
-                  <Typography.Title level={3}>
-                    {t("videoWizard.requirementsTitle")}
-                  </Typography.Title>
-                  <Card className={styles.formCard}>
-                    <div className={styles.formGrid}>
-                      <label>
-                        {t("videoWizard.purpose")}
-                        <Select
-                          value={brief.purpose || undefined}
-                          onChange={(purpose) => changeBrief({ purpose })}
-                          placeholder={t("videoWizard.purposeHint")}
-                          options={[
-                            "launch",
-                            "promotion",
-                            "introduction",
-                            "brand",
-                          ].map((value) => ({
-                            value,
-                            label: t(`videoWizard.purposes.${value}`),
-                          }))}
-                        />
-                      </label>
-                      <label>
-                        {t("videoWizard.audience")}
-                        <Input
-                          maxLength={200}
-                          value={brief.audience}
-                          onChange={(e) =>
-                            changeBrief({ audience: e.target.value })
-                          }
-                        />
-                      </label>
-                      <div className={styles.platformField}>
-                        {t("videoWizard.platform")}
-                        <Checkbox.Group
-                          className={styles.platformOptions}
-                          value={splitPlatforms(brief.platform)}
-                          onChange={(values) => {
-                            const next = values as string[];
-                            changeBrief({ platform: joinPlatforms(next) });
-                            const selected = new Set(next);
-                            const formats = new Set<VideoFormat>();
-                            (
-                              Object.keys(
-                                PLATFORM_FORMATS,
-                              ) as (typeof PLATFORM_KEYS)[number][]
-                            ).forEach((key) => {
-                              if (
-                                selected.has(t(`videoWizard.platforms.${key}`))
-                              ) {
-                                formats.add(PLATFORM_FORMATS[key]);
-                              }
-                            });
-                            // Every chosen platform agrees on one ratio: follow it.
-                            if (
-                              formats.size === 1 &&
-                              [...formats][0] !== request.format
-                            ) {
-                              changeRequest({ format: [...formats][0] });
-                            }
-                          }}
-                          options={platformOptions}
-                        />
-                      </div>
-                      <label>
-                        {t("videoWizard.targetDuration")}
-                        <Select
-                          allowClear
-                          value={brief.targetDuration || undefined}
-                          onChange={(targetDuration) =>
-                            changeBrief({
-                              targetDuration: targetDuration ?? "",
-                            })
-                          }
-                          options={[15, 30, 60].map((value) => ({
-                            value: String(value),
-                            label: `${value} ${t("videoWizard.seconds")}`,
-                          }))}
-                        />
-                      </label>
-                      <label>
-                        {t("videoWizard.style")}
-                        <Select
-                          allowClear
-                          value={brief.style || undefined}
-                          onChange={(style) =>
-                            changeBrief({ style: style ?? "" })
-                          }
-                          options={[
-                            "natural",
-                            "elegant",
-                            "energetic",
-                            "minimal",
-                          ].map((value) => ({
-                            value,
-                            label: t(`videoWizard.styles.${value}`),
-                          }))}
-                        />
-                      </label>
-                      <label>
-                        {t("videoWizard.language")}
-                        <Select
-                          value={request.language}
-                          onChange={(language) => changeRequest({ language })}
-                          options={[
-                            { value: "zh", label: "中文" },
-                            { value: "en", label: "English" },
-                          ]}
-                        />
-                      </label>
-                      <label>
-                        {t("videoWizard.format")}
-                        <Radio.Group
-                          value={request.format}
-                          onChange={(e) =>
-                            changeRequest({ format: e.target.value })
-                          }
-                          optionType="button"
-                          buttonStyle="solid"
-                          options={[
-                            { value: "portrait", label: "9:16" },
-                            { value: "landscape", label: "16:9" },
-                            { value: "square", label: "1:1" },
-                          ]}
-                        />
-                        {formatNote && (
-                          <span
-                            className={
-                              requiredFormats.length > 1
-                                ? styles.formatHintWarning
-                                : styles.formatHint
-                            }
-                          >
-                            {formatNote}
-                          </span>
-                        )}
-                      </label>
-                    </div>
-                    <Checkbox
-                      checked={request.include_selling_points}
-                      onChange={(e) =>
-                        changeRequest({
-                          include_selling_points: e.target.checked,
-                        })
-                      }
-                    >
-                      {t("videoWizard.includeSellingPoints")}
-                    </Checkbox>
-                    <div className={styles.narrationRow}>
-                      <Checkbox
-                        checked={narrationEnabled}
-                        disabled={busy || !narrationAvailable}
-                        onChange={(e) => {
-                          setNarrationEnabled(e.target.checked);
-                          setSaved(false);
-                          setDraft((current) =>
-                            current
-                              ? { ...current, confirmed: false }
-                              : current,
-                          );
-                        }}
-                      >
-                        {t("videoWizard.narration")}
-                      </Checkbox>
-                      {narrationEnabled && narrationOptions?.voices.length ? (
-                        <Select
-                          size="small"
-                          aria-label={t("videoWizard.narrationVoice")}
-                          value={narrationVoice || undefined}
-                          onChange={(value) => {
-                            setNarrationVoice(value ?? "");
-                            setSaved(false);
-                            setDraft((current) =>
-                              current
-                                ? { ...current, confirmed: false }
-                                : current,
-                            );
-                          }}
-                          placeholder={t("videoWizard.narrationVoice")}
-                          options={narrationOptions.voices.map((voice) => ({
-                            value: voice.id,
-                            label: voice.label,
-                          }))}
-                        />
-                      ) : null}
-                      {narrationEnabled && !narrationOptions?.premium ? (
-                        <span className={styles.narrationHint}>
-                          {t("videoWizard.narrationLocalHint")}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className={styles.narrationRow}>
-                      <Checkbox
-                        checked={bgmEnabled}
-                        disabled={busy}
-                        onChange={(e) => {
-                          setBgmEnabled(e.target.checked);
-                          if (!e.target.checked) {
-                            bgmPreviewRef.current?.pause();
-                            bgmPreviewRef.current = null;
-                            setBgmPreview("");
-                          }
-                          setSaved(false);
-                          setDraft((current) =>
-                            current
-                              ? { ...current, confirmed: false }
-                              : current,
-                          );
-                        }}
-                      >
-                        {t("videoWizard.bgm")}
-                      </Checkbox>
-                      {bgmEnabled && bgmOptions?.items.length ? (
-                        <>
-                          <Select
-                            size="small"
-                            showSearch
-                            optionFilterProp="label"
-                            aria-label={t("videoWizard.bgmTrack")}
-                            value={bgmId || bgmOptions.default || undefined}
-                            onChange={(value) => {
-                              setBgmId(value ?? "");
-                              setSaved(false);
-                              setDraft((current) =>
-                                current
-                                  ? { ...current, confirmed: false }
-                                  : current,
-                              );
-                            }}
-                            placeholder={t("videoWizard.bgmTrack")}
-                            options={bgmOptions.items.map((track) => ({
-                              value: track.id,
-                              label: track.bpm
-                                ? `${track.name} · ${Math.round(track.bpm)} BPM`
-                                : track.name,
-                            }))}
-                          />
-                          {(() => {
-                            const current = bgmId || bgmOptions.default || "";
-                            if (!current) return null;
-                            const playing = bgmPreview === current;
-                            return (
-                              <Button
-                                size="small"
-                                type="text"
-                                disabled={busy}
-                                aria-label={
-                                  playing
-                                    ? t("videoWizard.bgmPreviewStop")
-                                    : t("videoWizard.bgmPreview")
-                                }
-                                title={
-                                  playing
-                                    ? t("videoWizard.bgmPreviewStop")
-                                    : t("videoWizard.bgmPreview")
-                                }
-                                icon={
-                                  playing ? <X size={14} /> : <Play size={14} />
-                                }
-                                onClick={() => toggleBgmPreview(current)}
-                              />
-                            );
-                          })()}
-                        </>
-                      ) : null}
-                    </div>
-                    <Input.TextArea
-                      className={styles.sellingPoints}
-                      rows={3}
-                      maxLength={1200}
-                      disabled={Boolean(project) || busy}
-                      value={brief.sellingPoints}
-                      onChange={(e) =>
-                        changeBrief({ sellingPoints: e.target.value })
-                      }
-                      placeholder={t("videoWizard.sellingPointsSupplement")}
-                    />
-                    <details className={styles.advanced}>
-                      <summary>{t("videoWizard.advanced")}</summary>
-                      <label className={styles.secondsPerAsset}>
-                        {t("videoWizard.secondsPerAsset")}
-                        <InputNumber
-                          min={1}
-                          max={15}
-                          value={request.seconds_per_asset}
-                          onChange={(value) =>
-                            changeRequest({ seconds_per_asset: value ?? 4 })
-                          }
-                        />
-                      </label>
-                      <Input.TextArea
-                        rows={4}
-                        maxLength={2400}
-                        showCount
-                        value={brief.extra}
-                        onChange={(e) => changeBrief({ extra: e.target.value })}
-                        placeholder={t("videoWizard.instructionsHint")}
-                      />
-                    </details>
-                    <Typography.Paragraph type="secondary">
-                      {t("videoWizard.durationNote")}
-                    </Typography.Paragraph>
-                  </Card>
-                </section>
+                <PlanStage
+                  brief={brief}
+                  request={request}
+                  project={project}
+                  busy={busy}
+                  narrationAvailable={narrationAvailable}
+                  narrationOptions={narrationOptions}
+                  narrationEnabled={narrationEnabled}
+                  narrationVoice={narrationVoice}
+                  bgmOptions={bgmOptions}
+                  bgmEnabled={bgmEnabled}
+                  bgmId={bgmId}
+                  bgmPreview={bgmPreview}
+                  toggleBgmPreview={toggleBgmPreview}
+                  changeBrief={changeBrief}
+                  changeRequest={changeRequest}
+                  changeNarrationEnabled={changeNarrationEnabled}
+                  changeNarrationVoice={changeNarrationVoice}
+                  changeBgmEnabled={changeBgmEnabled}
+                  changeBgmId={changeBgmId}
+                />
               )}
 
               {step >= 2 && draft && (
-                <>
-                  <Card className={styles.summary}>
-                    <Space wrap>
-                      <strong>
-                        {product?.name ?? project?.snapshot.product.name}
-                      </strong>
-                      <span className={styles.metaItem}>
-                        <Clock3 size={15} />
-                        {t("videoWizard.estimatedDuration", {
-                          seconds: totalDuration,
-                        })}
-                      </span>
-                      <span>
-                        {draft.script.width === draft.script.height
-                          ? "1:1"
-                          : draft.script.width > draft.script.height
-                          ? "16:9"
-                          : "9:16"}
-                      </span>
-                      <span>
-                        {draft.request.language === "zh"
-                          ? t("videoWizard.chinese")
-                          : "English"}
-                      </span>
-                      <Tag
-                        color={
-                          draft.confirmed && saved
-                            ? "green"
-                            : !saved
-                            ? "orange"
-                            : "gold"
-                        }
-                        icon={
-                          draft.confirmed && saved ? (
-                            <CheckCircle2 size={14} />
-                          ) : (
-                            <Circle size={14} />
-                          )
-                        }
-                      >
-                        {draft.confirmed && saved
-                          ? t("videoWizard.confirmed")
-                          : !saved
-                          ? t("videoWizard.unsaved")
-                          : t("videoWizard.pendingConfirmation")}
-                      </Tag>
-                    </Space>
-                  </Card>
-                  {step === 2 && (
-                    <div className={styles.loading}>
-                      <Spin tip={t("videoWizard.generating")}>
-                        <div className={styles.spinArea} />
-                      </Spin>
-                    </div>
-                  )}
-                  {step === 3 && (
-                    <section>
-                      <div className={styles.sectionHeader}>
-                        <div>
-                          <Typography.Title level={3}>
-                            {t("videoWizard.storyboardTitle")}
-                          </Typography.Title>
-                          <Typography.Text type="secondary">
-                            {t("videoWizard.storyboardHint")}
-                          </Typography.Text>
-                        </div>
-                        <Button
-                          icon={<RefreshCw size={15} />}
-                          loading={busy}
-                          onClick={() => void generate()}
-                        >
-                          {t("videoWizard.regenerate")}
-                        </Button>
-                      </div>
-                      {totalDuration > 180 && (
-                        <Alert
-                          type="error"
-                          message={t("videoWizard.durationTooLong", {
-                            seconds: totalDuration,
-                          })}
-                        />
-                      )}
-                      <div className={styles.sceneGrid}>
-                        {draft.script.scenes.map((scene, index) => {
-                          const currentAsset = scene.asset
-                            ? assetByExportName.get(scene.asset)
-                            : undefined;
-                          const src = currentAsset
-                            ? imageUrls[currentAsset.id]
-                            : undefined;
-                          const candidates = orderedSceneAssets.filter(
-                            (asset) => mediaType(asset) === scene.type,
-                          );
-                          return (
-                            <Card
-                              key={`${scene.id}-${index}`}
-                              className={styles.sceneCard}
-                              title={
-                                <Space>
-                                  <span className={styles.sceneNumber}>
-                                    {index + 1}
-                                  </span>
-                                  <Tag>
-                                    {t(`videoWizard.sceneType.${scene.type}`)}
-                                  </Tag>
-                                </Space>
-                              }
-                              extra={
-                                <InputNumber
-                                  aria-label={t("videoWizard.sceneDuration")}
-                                  min={0.25}
-                                  max={15}
-                                  step={0.25}
-                                  value={scene.duration}
-                                  onChange={(duration) =>
-                                    updateScene(index, {
-                                      duration: duration ?? 1,
-                                    })
-                                  }
-                                  addonAfter={t("videoWizard.seconds")}
-                                />
-                              }
-                            >
-                              <div className={styles.scenePreview}>
-                                {scene.type === "image" ||
-                                scene.type === "video" ? (
-                                  src &&
-                                  currentAsset &&
-                                  mediaType(currentAsset) === "image" ? (
-                                    <img
-                                      src={src}
-                                      alt={currentAsset.filename}
-                                    />
-                                  ) : src && currentAsset ? (
-                                    <video
-                                      src={src}
-                                      muted
-                                      controls
-                                      preload="metadata"
-                                    />
-                                  ) : (
-                                    <div>
-                                      <ImageIcon size={25} />
-                                      <span>
-                                        {scene.asset
-                                          ? currentAsset?.filename ??
-                                            scene.asset
-                                          : t("videoWizard.previewPlaceholder")}
-                                      </span>
-                                    </div>
-                                  )
-                                ) : (
-                                  <div className={styles.textPreview}>
-                                    <strong>
-                                      {scene.text ||
-                                        scene.bullets?.[0] ||
-                                        t("videoWizard.textCard")}
-                                    </strong>
-                                    {scene.subtitle && (
-                                      <span>{scene.subtitle}</span>
-                                    )}
-                                    {scene.bullets
-                                      ?.slice(1, 3)
-                                      .map((line) => (
-                                        <span key={line}>• {line}</span>
-                                      ))}
-                                  </div>
-                                )}
-                                <Tag className={styles.previewLabel}>
-                                  {t("videoWizard.previewOnly")}
-                                </Tag>
-                              </div>
-                              {(scene.type === "title" ||
-                                scene.type === "text" ||
-                                scene.type === "endcard") && (
-                                <Input
-                                  maxLength={400}
-                                  aria-label={t("videoWizard.sceneText")}
-                                  value={scene.text ?? ""}
-                                  onChange={(e) =>
-                                    updateScene(index, { text: e.target.value })
-                                  }
-                                  placeholder={t("videoWizard.sceneText")}
-                                />
-                              )}
-                              {(scene.type === "title" ||
-                                scene.type === "endcard") && (
-                                <Input
-                                  maxLength={400}
-                                  aria-label={t("videoWizard.sceneSubtitle")}
-                                  value={scene.subtitle ?? ""}
-                                  onChange={(e) =>
-                                    updateScene(index, {
-                                      subtitle: e.target.value,
-                                    })
-                                  }
-                                  placeholder={t("videoWizard.sceneSubtitle")}
-                                />
-                              )}
-                              {(scene.type === "image" ||
-                                scene.type === "video") && (
-                                <>
-                                  <Select
-                                    aria-label={t("videoWizard.replaceAsset")}
-                                    value={scene.asset}
-                                    onChange={(asset) =>
-                                      updateScene(index, { asset })
-                                    }
-                                    placeholder={t("videoWizard.replaceAsset")}
-                                    options={candidates.map((asset) => ({
-                                      value: exportName(
-                                        asset,
-                                        orderedSceneAssets.indexOf(asset),
-                                      ),
-                                      label: asset.filename,
-                                    }))}
-                                  />
-                                  <Input
-                                    maxLength={400}
-                                    aria-label={t("videoWizard.caption")}
-                                    value={scene.caption ?? ""}
-                                    onChange={(e) =>
-                                      updateScene(index, {
-                                        caption: e.target.value,
-                                      })
-                                    }
-                                    placeholder={t("videoWizard.caption")}
-                                  />
-                                </>
-                              )}
-                              {scene.type === "bullets" && (
-                                <Input.TextArea
-                                  aria-label={t("videoWizard.bullets")}
-                                  rows={3}
-                                  value={(scene.bullets ?? []).join("\n")}
-                                  onChange={(e) =>
-                                    updateScene(index, {
-                                      bullets: e.target.value
-                                        .split("\n")
-                                        .slice(0, 8)
-                                        .map((line) => line.slice(0, 150)),
-                                    })
-                                  }
-                                />
-                              )}
-                              {scene.type === "text" && (
-                                <Input
-                                  maxLength={400}
-                                  aria-label={t("videoWizard.caption")}
-                                  value={scene.caption ?? ""}
-                                  onChange={(e) =>
-                                    updateScene(index, {
-                                      caption: e.target.value,
-                                    })
-                                  }
-                                  placeholder={t("videoWizard.caption")}
-                                />
-                              )}
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  )}
-                </>
+                <StoryboardStage
+                  key={`${userId}:${requestedProjectId}:${draft.project_id}`}
+                  step={step}
+                  draft={draft}
+                  productName={product?.name ?? project?.snapshot.product.name}
+                  totalDuration={totalDuration}
+                  saved={saved}
+                  busy={busy}
+                  assetByExportName={assetByExportName}
+                  imageUrls={imageUrls}
+                  orderedSceneAssets={orderedSceneAssets}
+                  updateScenes={updateScenes}
+                />
               )}
 
               {step === 2 && !draft && (
@@ -2030,241 +1121,49 @@ export default function ProductVideoWizardPage() {
                 </div>
               )}
 
-              {environmentSupported &&
-                (step === 3 || step === 4) &&
-                environmentPanel}
-
-              {step === 4 && draft?.confirmed && isDesktop && (
-                <section className={styles.exportPanel}>
-                  <Card
-                    className={styles.desktopJobCard}
-                    classNames={{ body: styles.desktopJobBody }}
-                  >
-                    {isNativeComplete && desktopJob?.videoUrl ? (
-                      <video
-                        className={styles.completedVideoFrame}
-                        src={desktopJob.videoUrl}
-                        controls
-                        preload="metadata"
-                      />
-                    ) : (
-                      <div className={styles.desktopCover}>
-                        {coverAsset && imageUrls[coverAsset.id] ? (
-                          coverAsset.media_type.startsWith("video/") ? (
-                            <video
-                              src={imageUrls[coverAsset.id]}
-                              muted
-                              controls
-                              preload="metadata"
-                            />
-                          ) : (
-                            <img src={imageUrls[coverAsset.id]} alt="" />
-                          )
-                        ) : (
-                          <div className={styles.coverPlaceholder}>
-                            <ImageIcon size={26} />
-                          </div>
-                        )}
-                        <Tag className={styles.coverTag}>
-                          {t("videoWizard.coverSample")}
-                        </Tag>
-                      </div>
-                    )}
-                    <div className={styles.desktopJobContent}>
-                      <div className={styles.nativeTimeline}>
-                        {nativeStages.map((stage, index) => {
-                          const completed =
-                            isNativeComplete ||
-                            (isNativeActive && index < currentNativeStage);
-                          const current =
-                            isNativeActive && index === currentNativeStage;
-                          const status = completed
-                            ? "done"
-                            : current
-                            ? "current"
-                            : "pending";
-                          return (
-                            <div
-                              className={`${styles.nativeStage} ${
-                                completed
-                                  ? styles.nativeStageDone
-                                  : current
-                                  ? styles.nativeStageCurrent
-                                  : ""
-                              }`}
-                              key={stage}
-                            >
-                              <span className={styles.nativeStageIcon}>
-                                {completed ? (
-                                  <CheckCircle2 size={20} />
-                                ) : current ? (
-                                  <LoaderCircle size={20} />
-                                ) : (
-                                  <Circle size={20} />
-                                )}
-                              </span>
-                              <div className={styles.nativeStageCopy}>
-                                <strong>
-                                  {t(`videoWizard.stage.${stage}`)}
-                                </strong>
-                                <span>
-                                  {t(`videoWizard.stageStatus.${status}`)}
-                                </span>
-                                {current &&
-                                  desktopJob &&
-                                  desktopJob.progress !== null && (
-                                    <Progress
-                                      className={styles.nativeStageProgress}
-                                      percent={Math.round(
-                                        Math.max(
-                                          0,
-                                          Math.min(1, desktopJob.progress),
-                                        ) * 100,
-                                      )}
-                                      status="active"
-                                      strokeColor="var(--fn-color-primary, #f04e70)"
-                                      size="small"
-                                    />
-                                  )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {desktopJob && isActiveDesktopVideoJob(desktopJob) ? (
-                        <>
-                          <Typography.Title level={4}>
-                            {t("videoWizard.activeTitle")}
-                          </Typography.Title>
-                          <Typography.Text
-                            className={styles.nativeDescription}
-                            type="secondary"
-                          >
-                            {t("videoWizard.activeHint")}
-                          </Typography.Text>
-                          <Space wrap>
-                            <Button
-                              type="primary"
-                              icon={<ArrowRight size={15} />}
-                              onClick={() => navigate("/product-library")}
-                            >
-                              {t("videoWizard.backgroundNavigate")}
-                            </Button>
-                            <Button
-                              danger
-                              icon={<X size={15} />}
-                              loading={nativeBusy}
-                              onClick={() => void cancelNativeJob()}
-                            >
-                              {t("videoWizard.cancelJob")}
-                            </Button>
-                          </Space>
-                        </>
-                      ) : desktopJob?.state === "completed" ? (
-                        <>
-                          <Typography.Title level={4}>
-                            {t("videoWizard.completedTitle")}
-                          </Typography.Title>
-                          {!desktopJob.videoUrl && (
-                            <Alert
-                              type="warning"
-                              showIcon
-                              message={t("videoWizard.videoUnavailable")}
-                            />
-                          )}
-                          {desktopJob.videoUrl && (
-                            <Button
-                              type="primary"
-                              icon={<Download size={15} />}
-                              loading={nativeSaving}
-                              disabled={nativeSaving}
-                              onClick={() => void saveNativeVideo()}
-                            >
-                              {t("videoWizard.saveVideo")}
-                            </Button>
-                          )}
-                        </>
-                      ) : desktopJob &&
-                        ["failed", "cancelled", "interrupted"].includes(
-                          desktopJob.state,
-                        ) ? (
-                        <>
-                          <Alert
-                            type={
-                              desktopJob.state === "failed" ? "error" : "info"
-                            }
-                            showIcon
-                            message={t(
-                              `videoWizard.jobState.${desktopJob.state}`,
-                            )}
-                            description={
-                              desktopJob.errorCode
-                                ? t(
-                                    `videoWizard.desktopErrors.${desktopJob.errorCode}`,
-                                  )
-                                : undefined
-                            }
-                          />
-                          <Button
-                            type="primary"
-                            icon={<RefreshCw size={15} />}
-                            loading={nativeBusy}
-                            disabled={!environmentReady}
-                            onClick={() => void retryNativeJob()}
-                          >
-                            {t("videoWizard.retryJob")}
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Typography.Title level={4}>
-                            {t("videoWizard.startReadyTitle")}
-                          </Typography.Title>
-                          <Typography.Paragraph type="secondary">
-                            {t("videoWizard.startReadyHint")}
-                          </Typography.Paragraph>
-                          <Button
-                            type="primary"
-                            icon={<Play size={15} />}
-                            loading={nativeBusy}
-                            disabled={!environmentReady}
-                            onClick={() => void startNativeJob()}
-                          >
-                            {t("videoWizard.startDesktop")}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </Card>
-                </section>
+              {environmentSupported && (step === 3 || step === 4) && (
+                <EnvironmentPanel
+                  environmentStatus={environmentStatus}
+                  environmentBusy={environmentBusy}
+                  recheckEnvironment={recheckEnvironment}
+                  installEnvironment={installEnvironment}
+                  verifyEnvironment={verifyEnvironment}
+                />
               )}
 
-              {step === 4 && draft?.confirmed && !isDesktop && (
-                <section className={styles.exportPanel}>
-                  <Typography.Title level={3}>
-                    {t("videoWizard.exportTitle")}
-                  </Typography.Title>
-                  <Alert
-                    type="success"
-                    showIcon
-                    message={t("videoWizard.exportReady")}
-                    description={
-                      <div>
-                        <p>{t("videoWizard.exportExtract")}</p>
-                        <p>
-                          <code>preview.cmd</code> ·{" "}
-                          {t("videoWizard.windowsPreview")}
-                        </p>
-                        <p>
-                          <code>preview.command</code> ·{" "}
-                          {t("videoWizard.macPreview")}
-                        </p>
-                        <p>{t("videoWizard.renderGuide")}</p>
-                        <p>{t("videoWizard.nodeGuide")}</p>
-                      </div>
-                    }
-                  />
-                </section>
+              {step === 4 && draft?.confirmed && (
+                <OutputStage
+                  isDesktop={isDesktop}
+                  desktopJob={desktopJob}
+                  coverAsset={coverAsset}
+                  imageUrls={imageUrls}
+                  nativeBusy={nativeBusy}
+                  nativeSaving={nativeSaving}
+                  environmentReady={environmentReady}
+                  backToLibrary={() => navigate("/product-library")}
+                  startNativeJob={startNativeJob}
+                  cancelNativeJob={cancelNativeJob}
+                  saveNativeVideo={saveNativeVideo}
+                  retryNativeJob={retryNativeJob}
+                  selectedPlatforms={splitPlatforms(brief.platform)}
+                  outputLanguage={draft.request.language}
+                  startBatch={isDesktop && environmentReady ? startBatch : undefined}
+                  batchTargets={desktopJob?.targets?.map((target) => ({
+                    id: target.id,
+                    platform: target.filename,
+                    profile: "custom" as const,
+                    width: target.width,
+                    height: target.height,
+                    fps: target.fps,
+                    language: draft.request.language,
+                    safeArea: "standard" as const,
+                    filename: target.filename,
+                    status: target.status,
+                    error: target.errorCode,
+                  }))}
+                  downloadStudioPackage={download}
+                  saveBatch={saveBatch}
+                />
               )}
             </>
           )}
@@ -2351,7 +1250,12 @@ export default function ProductVideoWizardPage() {
               {step === 3 && draft && (
                 <>
                   <Button
-                    disabled={busy || uploadBusy || saved}
+                    disabled={
+                      busy ||
+                      uploadBusy ||
+                      saved ||
+                      !scriptValid(draft.script, assetByExportName)
+                    }
                     loading={busy}
                     onClick={() => void persist(false)}
                   >
