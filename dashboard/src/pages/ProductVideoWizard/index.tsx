@@ -147,6 +147,10 @@ export default function ProductVideoWizardPage() {
   const requestVersion = useRef(0);
   const productIdRef = useRef<string | null>(null);
   const tRef = useRef(t);
+  const generatedProjectRoute = useRef<{
+    id: string;
+    user: typeof userId;
+  } | null>(null);
   tRef.current = t;
 
   useEffect(() => {
@@ -199,6 +203,7 @@ export default function ProductVideoWizardPage() {
     () => () => {
       bgmPreviewRef.current?.pause();
       bgmPreviewRef.current = null;
+      cleanUrls();
     },
     [],
   );
@@ -224,6 +229,14 @@ export default function ProductVideoWizardPage() {
   };
 
   useEffect(() => {
+    const generatedRoute = generatedProjectRoute.current;
+    generatedProjectRoute.current = null;
+    if (
+      generatedRoute?.id === requestedProjectId &&
+      generatedRoute?.user === userId
+    ) {
+      return;
+    }
     let active = true;
     setLoading(true);
     setLoadFailed(false);
@@ -327,12 +340,7 @@ export default function ProductVideoWizardPage() {
       });
     return () => {
       active = false;
-      cleanUrls();
     };
-    // ``location.key`` is deliberately absent: it changes on every
-    // navigation, including the one that puts the freshly generated project
-    // into the URL. Depending on it would tear the whole wizard down and
-    // rebuild it right after the picture was generated.
   }, [userId, requestedProjectId, requestedProductId]);
 
   useEffect(() => {
@@ -651,6 +659,9 @@ export default function ProductVideoWizardPage() {
       // picture leaves them alone; keep the local copy as the source of truth.
       setSaved(true);
       setStep(3);
+      if (requestedProjectId !== activeProject.id) {
+        generatedProjectRoute.current = { id: activeProject.id, user: userId };
+      }
       navigate(
         `/product-library/video-wizard?project=${encodeURIComponent(
           activeProject.id,
@@ -667,7 +678,7 @@ export default function ProductVideoWizardPage() {
     }
   };
 
-  const updateScene = (index: number, patch: Partial<StoryboardScene>) => {
+  const updateScenes = (scenes: StoryboardScene[]) => {
     setDraft((current) =>
       current
         ? {
@@ -675,9 +686,7 @@ export default function ProductVideoWizardPage() {
             confirmed: false,
             script: {
               ...current.script,
-              scenes: current.script.scenes.map((scene, i) =>
-                i === index ? { ...scene, ...patch } : scene,
-              ),
+              scenes,
             },
           }
         : current,
@@ -1053,6 +1062,7 @@ export default function ProductVideoWizardPage() {
 
               {step >= 2 && draft && (
                 <StoryboardStage
+                  key={`${userId}:${requestedProjectId}:${draft.project_id}`}
                   step={step}
                   draft={draft}
                   productName={product?.name ?? project?.snapshot.product.name}
@@ -1062,8 +1072,7 @@ export default function ProductVideoWizardPage() {
                   assetByExportName={assetByExportName}
                   imageUrls={imageUrls}
                   orderedSceneAssets={orderedSceneAssets}
-                  generate={generate}
-                  updateScene={updateScene}
+                  updateScenes={updateScenes}
                 />
               )}
 
@@ -1184,7 +1193,12 @@ export default function ProductVideoWizardPage() {
               {step === 3 && draft && (
                 <>
                   <Button
-                    disabled={busy || uploadBusy || saved}
+                    disabled={
+                      busy ||
+                      uploadBusy ||
+                      saved ||
+                      !scriptValid(draft.script, assetByExportName)
+                    }
                     loading={busy}
                     onClick={() => void persist(false)}
                   >

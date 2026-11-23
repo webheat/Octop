@@ -299,9 +299,10 @@ describe("product video wizard", () => {
     await user.click(
       screen.getByRole("button", { name: "videoWizard.generate" }),
     );
-    await waitFor(() => {
-      expect(api.getStoryboard).toHaveBeenCalledWith(project.id);
+    await screen.findByRole("button", {
+      name: "videoWizard.confirmContinue",
     });
+    expect(api.getStoryboard).not.toHaveBeenCalled();
     const confirm = await screen.findByRole("button", {
       name: "videoWizard.confirmContinue",
     });
@@ -390,7 +391,10 @@ describe("product video wizard", () => {
     api.downloadStoryboardPackage.mockResolvedValue(new Blob(["zip"]));
     renderWizard("/product-library/video-wizard?project=project1");
     await screen.findByText("videoWizard.storyboardTitle");
-    expect(screen.getAllByDisplayValue("Sample product")).toHaveLength(2);
+    await user.click(
+      screen.getByRole("button", { name: "videoWizard.advancedEdit" }),
+    );
+    expect(screen.getAllByDisplayValue("Sample product")).toHaveLength(1);
     expect(screen.queryByText("foreign.jpg")).not.toBeInTheDocument();
     const subtitle = screen.getAllByRole("textbox", {
       name: "videoWizard.sceneSubtitle",
