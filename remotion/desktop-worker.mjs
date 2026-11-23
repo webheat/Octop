@@ -19,7 +19,7 @@ const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const debug = (message) => process.stderr.write(`[worker] ${message}\n`);
 
 function parseArgs(argv) {
-  const result = { mode: null, cache: process.env.OCTOP_DESKTOP_VIDEO_CACHE ?? null, project: null, out: null };
+  const result = { mode: null, cache: process.env.OCTOP_DESKTOP_VIDEO_CACHE ?? null, project: null, out: null, targets: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (["--check", "--verify"].includes(arg)) {
@@ -28,10 +28,14 @@ function parseArgs(argv) {
     } else if (arg === "--cache") result.cache = argv[++i];
     else if (arg === "--project") result.project = argv[++i];
     else if (arg === "--out") result.out = argv[++i];
+    else if (arg === "--targets") {
+      try { result.targets = JSON.parse(argv[++i]); } catch { throw new Error("invalid render targets"); }
+    }
     else throw new Error("invalid worker arguments");
   }
   if (result.mode && (!result.cache || result.project || result.out)) throw new Error("environment action requires only --cache");
   if (!result.mode && (!result.project || !result.out)) throw new Error("--project and --out are required");
+  if (result.targets !== null && (!Array.isArray(result.targets) || result.targets.length < 1 || result.targets.length > 32)) throw new Error("invalid render targets");
   return result;
 }
 
@@ -235,7 +239,26 @@ async function verifyEnvironment(cacheArg) {
   }
 }
 
-async function renderJob(project, out) {
+export function validateTargets(targets) {
+  if (!Array.isArray(targets)) return null;
+  const ids = new Set();
+  const filenames = new Set();
+  return targets.map((target) => {
+    if (!target || typeof target !== "object" || typeof target.id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(target.id) || ids.has(target.id)) throw new Error("invalid render target id");
+    ids.add(target.id);
+    if (typeof target.filename !== "string" || path.basename(target.filename) !== target.filename || !/^[a-zA-Z0-9._-]{1,120}\.mp4$/i.test(target.filename)) throw new Error("invalid render target filename");
+    const filenameKey = target.filename.toLowerCase();
+    if (filenames.has(filenameKey)) throw new Error("duplicate render target filename");
+    filenames.add(filenameKey);
+    if (target.profile && !["short_vertical", "landscape", "square", "custom"].includes(target.profile)) throw new Error("invalid render profile");
+    if (!Number.isInteger(target.width) || target.width < 2 || target.width > 4096 || target.width % 2) throw new Error("invalid render target width");
+    if (!Number.isInteger(target.height) || target.height < 2 || target.height > 4096 || target.height % 2) throw new Error("invalid render target height");
+    if (!Number.isInteger(target.fps) || target.fps < 1 || target.fps > 120) throw new Error("invalid render target fps");
+    return target;
+  });
+}
+
+async function renderJob(project, out, rawTargets = null) {
   const cache = cacheDirectory(process.env.OCTOP_DESKTOP_VIDEO_CACHE ?? path.join(process.cwd(), "desktop-video-environment"));
   const ready = await prerequisites(cache);
   if (ready.errorCode) {
@@ -253,14 +276,41 @@ async function renderJob(project, out) {
     try {
       emit({ type: "stage", stage: "preparing" });
       const { renderProject } = await import("./render.mjs");
-      const result = await renderProject({ projectDir: data.root, outPath: path.resolve(out), trustedTemplate: true, browserExecutable: ready.browserPath, cancelSignal: cancellation.signal,
-        onStage: (stage) => emit({ type: "stage", stage }),
-        onProgress: ({ stage, progress }) => { if (stage === "rendering") emit({ type: "progress", progress: Math.max(0, Math.min(1, progress)) }); },
-      });
-      emit({ type: "stage", stage: "saving" });
-      const stat = fs.statSync(result.output);
-      if (!stat.isFile() || stat.size <= 0) throw new Error("renderer produced an empty output");
-      emit({ type: "complete", output: result.output, bytes: stat.size, duration: result.duration });
+      const targets = validateTargets(rawTargets);
+      if (!targets) {
+        const result = await renderProject({ projectDir: data.root, outPath: path.resolve(out), trustedTemplate: true, browserExecutable: ready.browserPath, cancelSignal: cancellation.signal,
+          onStage: (stage) => emit({ type: "stage", stage }),
+          onProgress: ({ stage, progress }) => { if (stage === "rendering") emit({ type: "progress", progress: Math.max(0, Math.min(1, progress)) }); },
+        });
+        emit({ type: "stage", stage: "saving" });
+        const stat = fs.statSync(result.output);
+        if (!stat.isFile() || stat.size <= 0) throw new Error("renderer produced an empty output");
+        emit({ type: "complete", output: result.output, bytes: stat.size, duration: result.duration });
+      } else {
+        const outputRoot = path.resolve(out);
+        fs.mkdirSync(outputRoot, { recursive: true });
+        const outputs = [];
+        for (const target of targets) {
+          if (cancellation.signal.aborted) throw Object.assign(new Error("render cancelled"), { name: "AbortError" });
+          const destination = path.join(outputRoot, target.filename);
+          emit({ type: "target-start", targetId: target.id });
+          try {
+            const result = await renderProject({ projectDir: data.root, outPath: destination, profile: target.profile === "custom" ? null : target.profile, width: target.width, height: target.height, fps: target.fps, trustedTemplate: true, browserExecutable: ready.browserPath, cancelSignal: cancellation.signal,
+              onProgress: ({ stage, progress }) => { if (stage === "rendering") emit({ type: "progress", targetId: target.id, progress: Math.max(0, Math.min(1, progress)) }); },
+            });
+            const stat = fs.statSync(result.output);
+            if (!stat.isFile() || stat.size <= 0) throw new Error("renderer produced an empty output");
+            const item = { targetId: target.id, output: result.output, bytes: stat.size, duration: result.duration, width: target.width, height: target.height, fps: target.fps };
+            outputs.push(item);
+            emit({ type: "target-complete", ...item });
+          } catch (error) {
+            if (error?.name === "AbortError" || cancellation.signal.aborted) throw error;
+            emit({ type: "target-failed", targetId: target.id, errorCode: error?.code ?? "RENDER_FAILED", message: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        const failed = targets.length - outputs.length;
+        emit({ type: "batch-complete", succeeded: outputs.length, failed, outputs });
+      }
     } finally { console.log = log; }
   } catch (error) {
     const cancelled = error?.name === "AbortError" || /cancel/i.test(error?.message ?? "");
@@ -277,7 +327,7 @@ async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.mode === "check") process.exitCode = await checkEnvironment(args.cache);
     else if (args.mode === "verify") process.exitCode = await verifyEnvironment(args.cache);
-    else await renderJob(args.project, args.out);
+    else await renderJob(args.project, args.out, args.targets);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
     if (process.argv.includes("--check") || process.argv.includes("--verify")) {

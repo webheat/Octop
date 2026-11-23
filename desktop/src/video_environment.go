@@ -21,6 +21,7 @@ type VideoEnvironmentStatus struct {
 	ErrorCode       string   `json:"errorCode,omitempty"`
 	CheckedAt       int64    `json:"checkedAt,omitempty"`
 	RequiresInstall bool     `json:"requiresInstall,omitempty"`
+	OutputBatchSupported bool `json:"outputBatchSupported"`
 }
 
 type environmentMessage struct {
@@ -93,8 +94,17 @@ func (m *videoManager) environmentAction(token, action string) (VideoEnvironment
 
 func (m *videoManager) environmentSnapshot() VideoEnvironmentStatus {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.environment
+	status := m.environment
+	m.mu.Unlock()
+	status.OutputBatchSupported = videoOutputBatchSupported()
+	return status
+}
+
+func videoOutputBatchSupported() bool {
+	runtimeDir, err := videoRuntimeDir(); if err != nil { return false }
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "runtime.json")); if err != nil { return false }
+	var manifest runtimeManifest
+	return json.Unmarshal(data, &manifest) == nil && manifest.Schema == "octop-desktop-video-runtime/1" && manifest.TemplateVersion == 1 && manifest.OutputBatchVersion == 1
 }
 
 func (m *videoManager) startEnvironment(mode string) (VideoEnvironmentStatus, error) {

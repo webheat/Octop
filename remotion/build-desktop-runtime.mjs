@@ -109,7 +109,7 @@ async function main() {
     } finally {
       fs.rmSync(browserPrep, { force: true });
     }
-    fs.writeFileSync(path.join(stagedRuntime, "runtime.json"), `${JSON.stringify({ schema: "octop-desktop-video-runtime/1", templateVersion: 1, nodeVersion: NODE_VERSION, target, browserMode: "headless-shell" }, null, 2)}\n`);
+    fs.writeFileSync(path.join(stagedRuntime, "runtime.json"), `${JSON.stringify({ schema: "octop-desktop-video-runtime/1", templateVersion: 1, outputBatchVersion: 1, nodeVersion: NODE_VERSION, target, browserMode: "headless-shell" }, null, 2)}\n`);
     if (replaceExisting) fs.rmSync(root, { recursive: true, force: true });
     moveDirectory(stagedRuntime, root);
     console.log(`Prepared trusted video runtime at ${root}`);

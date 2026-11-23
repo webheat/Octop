@@ -243,6 +243,17 @@ func TestSafeVideoNameAndSameFileCopy(t *testing.T) {
 	}
 }
 
+func TestValidVideoTargetsAndOutputContainment(t *testing.T) {
+	targets := []VideoTargetRequest{{ID: "reel", Profile: "short_vertical", Width: 1080, Height: 1920, FPS: 30, Filename: "reel.mp4"}}
+	if !validVideoTargets(targets) { t.Fatal("valid target was rejected") }
+	if _, ok := expectedTargetOutput(t.TempDir(), targets, "unknown", "/tmp/elsewhere.mp4"); ok { t.Fatal("unknown target output was accepted") }
+	duplicate := append([]VideoTargetRequest(nil), targets...)
+	duplicate = append(duplicate, VideoTargetRequest{ID:"other", Width:1080, Height:1920, FPS:30, Filename:"REEL.mp4"})
+	if validVideoTargets(duplicate) { t.Fatal("duplicate output filename was accepted") }
+	odd := append([]VideoTargetRequest(nil), targets...); odd[0].Width = 1079
+	if validVideoTargets(odd) { t.Fatal("odd H.264 width was accepted") }
+}
+
 func TestVideoEnvironmentCheckAndVerifyUseTrustedWorker(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("OCTOP_HOME", root)

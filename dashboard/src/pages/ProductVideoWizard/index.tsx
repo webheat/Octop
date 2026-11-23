@@ -35,6 +35,7 @@ import {
   decodeVideoBrief,
   EMPTY_VIDEO_BRIEF,
   encodeVideoBrief,
+  splitPlatforms,
   type VideoBrief,
 } from "./brief";
 
@@ -756,6 +757,33 @@ export default function ProductVideoWizardPage() {
     }
   };
 
+  const startBatch = async (targets: import("./OutputStage").RenderTarget[]) => {
+    if (!project || !environmentReady) return;
+    setNativeBusy(true);
+    setError("");
+    try {
+      await desktopVideo.startVariants(project.id, targets);
+    } catch (nativeError) {
+      setError(nativeErrorMessage(nativeError, t));
+    } finally {
+      setNativeBusy(false);
+    }
+  };
+
+  const saveBatch = async () => {
+    if (!desktopJob) return;
+    setNativeSaving(true);
+    setError("");
+    try {
+      const savedBatch = await desktopVideo.saveBatch(desktopJob.id);
+      if (savedBatch) message.success(t("videoWizard.videoSaved"));
+    } catch (nativeError) {
+      setError(nativeErrorMessage(nativeError, t));
+    } finally {
+      setNativeSaving(false);
+    }
+  };
+
   const cancelNativeJob = async () => {
     if (!desktopJob) return;
     setNativeBusy(true);
@@ -1106,6 +1134,24 @@ export default function ProductVideoWizardPage() {
                   cancelNativeJob={cancelNativeJob}
                   saveNativeVideo={saveNativeVideo}
                   retryNativeJob={retryNativeJob}
+                  selectedPlatforms={splitPlatforms(brief.platform)}
+                  outputLanguage={draft.request.language}
+                  startBatch={isDesktop && environmentReady ? startBatch : undefined}
+                  batchTargets={desktopJob?.targets?.map((target) => ({
+                    id: target.id,
+                    platform: target.filename,
+                    profile: "custom" as const,
+                    width: target.width,
+                    height: target.height,
+                    fps: target.fps,
+                    language: draft.request.language,
+                    safeArea: "standard" as const,
+                    filename: target.filename,
+                    status: target.status,
+                    error: target.errorCode,
+                  }))}
+                  downloadStudioPackage={download}
+                  saveBatch={saveBatch}
                 />
               )}
             </>

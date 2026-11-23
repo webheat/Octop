@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { validateTargets } from "../desktop-worker.mjs";
 
 const WORKER = fileURLToPath(new URL("../desktop-worker.mjs", import.meta.url));
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -69,4 +70,13 @@ test("worker rejects missing or extra native arguments", (t) => {
   const result = spawnSync(process.execPath, [WORKER, "--project", root, "--out", path.join(root, "out.mp4"), "--shell", "bad"], { cwd: root, encoding: "utf8", env: { ...process.env, OCTOP_DESKTOP_VIDEO_RUNTIME: root } });
   assert.equal(result.status, 1);
   assert.deepEqual(result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line)), [{ type: "error", code: "RENDER_FAILED" }]);
+});
+
+test("batch targets validate real canvas dimensions and unique safe output names", () => {
+  const base = { id: "tiktok-short", profile: "short_vertical", width: 1080, height: 1920, fps: 30, filename: "tiktok-short.mp4" };
+  assert.deepEqual(validateTargets([base]), [base]);
+  assert.throws(() => validateTargets([{ ...base, width: 1079 }]), /width/);
+  assert.throws(() => validateTargets([{ ...base, filename: "../escape.mp4" }]), /filename/);
+  assert.throws(() => validateTargets([base, { ...base, id: "youtube-landscape", filename: "TIKTOK-SHORT.mp4" }]), /duplicate render target filename/);
+  assert.throws(() => validateTargets([{ ...base, profile: "custom", width: 0 }]), /width/);
 });

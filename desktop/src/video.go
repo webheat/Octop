@@ -35,6 +35,29 @@ type VideoJob struct {
 	ErrorCode string   `json:"errorCode,omitempty"`
 	VideoURL  string   `json:"videoUrl,omitempty"`
 	UpdatedAt int64    `json:"updatedAt"`
+	Targets   []VideoOutput `json:"targets,omitempty"`
+}
+
+// VideoOutput is the per-file result of a multi-platform render. Legacy jobs
+// leave Targets empty and continue to expose VideoURL as before.
+type VideoOutput struct {
+	ID string `json:"id"`
+	Filename string `json:"filename"`
+	Width int `json:"width"`
+	Height int `json:"height"`
+	FPS int `json:"fps"`
+	Status string `json:"status"`
+	ErrorCode string `json:"errorCode,omitempty"`
+	VideoURL string `json:"videoUrl,omitempty"`
+}
+
+type VideoTargetRequest struct {
+	ID string `json:"id"`
+	Profile string `json:"profile,omitempty"`
+	Width int `json:"width"`
+	Height int `json:"height"`
+	FPS int `json:"fps"`
+	Filename string `json:"filename"`
 }
 
 type videoManifest struct {
@@ -79,8 +102,9 @@ type audioPlan struct {
 	} `json:"scenes"`
 }
 type runtimeManifest struct {
-	Schema          string `json:"schema"`
-	TemplateVersion int    `json:"templateVersion"`
+	Schema             string `json:"schema"`
+	TemplateVersion    int    `json:"templateVersion"`
+	OutputBatchVersion int    `json:"outputBatchVersion,omitempty"`
 }
 
 type videoJobRecord struct {
@@ -89,6 +113,9 @@ type videoJobRecord struct {
 	Output     string   `json:"output"`
 	Capability string   `json:"capability"`
 	ScriptHash string   `json:"scriptHash"`
+	Targets []VideoTargetRequest `json:"targets,omitempty"`
+	TargetOutputs map[string]string `json:"targetOutputs,omitempty"`
+	TargetCapabilities map[string]string `json:"targetCapabilities,omitempty"`
 }
 type videoManager struct {
 	mu                 sync.Mutex
@@ -287,6 +314,12 @@ func (m *videoManager) snapshot(rec *videoJobRecord) VideoJob {
 	} else {
 		j.VideoURL = ""
 	}
+	for i := range j.Targets {
+		j.Targets[i].VideoURL = ""
+		if rec.Job.Targets[i].Status == "completed" && m.listener != nil && rec.TargetCapabilities[j.Targets[i].ID] != "" {
+			j.Targets[i].VideoURL = fmt.Sprintf("http://%s/video/%s/%s/%s", m.listener.Addr().String(), j.ID, rec.TargetCapabilities[j.Targets[i].ID], j.Targets[i].ID)
+		}
+	}
 	return j
 }
 func (m *videoManager) list(token string) ([]VideoJob, error) {
@@ -323,6 +356,57 @@ func (m *videoManager) get(token, id string) (VideoJob, error) {
 }
 
 func (m *videoManager) start(token, project string) (VideoJob, error) {
+	return m.startWithTargets(token, project, nil)
+}
+
+func validVideoTargets(targets []VideoTargetRequest) bool {
+	if len(targets) == 0 || len(targets) > 16 { return false }
+	seen, filenames := map[string]bool{}, map[string]bool{}
+	for _, t := range targets {
+		if !validProjectID(t.ID) || seen[t.ID] || t.Width < 2 || t.Width > 4096 || t.Width%2 != 0 || t.Height < 2 || t.Height > 4096 || t.Height%2 != 0 || t.FPS < 1 || t.FPS > 120 { return false }
+		if t.Profile != "" && t.Profile != "short_vertical" && t.Profile != "landscape" && t.Profile != "square" && t.Profile != "custom" { return false }
+		seen[t.ID] = true
+		name := filepath.Base(t.Filename)
+		if name != t.Filename || strings.TrimSpace(name) != name || !strings.EqualFold(filepath.Ext(name), ".mp4") || name == ".mp4" || strings.ContainsAny(name, `/\\`) { return false }
+		key := strings.ToLower(name); if filenames[key] { return false }; filenames[key] = true
+	}
+	return true
+}
+
+func expectedTargetOutput(outDir string, targets []VideoTargetRequest, id, output string) (string, bool) {
+	var filename string
+	for _, target := range targets { if target.ID == id { filename = target.Filename; break } }
+	if filename == "" { return "", false }
+	expected := filepath.Join(outDir, filename)
+	got, err := filepath.Abs(output); if err != nil { return "", false }
+	want, err := filepath.Abs(expected); if err != nil || filepath.Clean(got) != filepath.Clean(want) { return "", false }
+	return expected, true
+}
+
+func (m *videoManager) updateTarget(rec *videoJobRecord, id, state, errorCode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range rec.Job.Targets {
+		if rec.Job.Targets[i].ID == id {
+			rec.Job.Targets[i].Status = state
+			rec.Job.Targets[i].ErrorCode = errorCode
+			break
+		}
+	}
+	m.persistLocked(rec)
+}
+
+func (m *videoManager) startVariants(token, project string, targets []VideoTargetRequest) (VideoJob, error) {
+	if !validVideoTargets(targets) { return VideoJob{}, videoErr("INVALID_TARGETS") }
+	runtimeDir, err := videoRuntimeDir()
+	if err != nil { return VideoJob{}, videoErr("RUNTIME_MISSING") }
+	var manifest runtimeManifest
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "runtime.json"))
+	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.OutputBatchVersion != 1 { return VideoJob{}, videoErr("BATCH_UNAVAILABLE") }
+	return m.startWithTargets(token, project, targets)
+}
+
+func (m *videoManager) startWithTargets(token, project string, targets []VideoTargetRequest) (VideoJob, error) {
 	if !validProjectID(project) {
 		return VideoJob{}, videoErr("NOT_FOUND")
 	}
@@ -352,7 +436,7 @@ func (m *videoManager) start(token, project string) (VideoJob, error) {
 	}
 	if m.active != "" {
 		r := m.jobs[m.active]
-		if r != nil && r.Job.OwnerID == owner && r.Job.ProjectID == project && r.ScriptHash == scriptHash {
+		if r != nil && r.Job.OwnerID == owner && r.Job.ProjectID == project && r.ScriptHash == scriptHash && sameVideoTargets(r.Targets, targets) {
 			j := m.snapshot(r)
 			m.mu.Unlock()
 			return j, nil
@@ -361,7 +445,7 @@ func (m *videoManager) start(token, project string) (VideoJob, error) {
 		return VideoJob{}, videoErr("BUSY")
 	}
 	for _, r := range m.jobs {
-		if r.Job.OwnerID == owner && r.Job.ProjectID == project && r.Job.State == "completed" && r.ScriptHash == scriptHash {
+		if r.Job.OwnerID == owner && r.Job.ProjectID == project && r.Job.State == "completed" && r.ScriptHash == scriptHash && sameVideoTargets(r.Targets, targets) {
 			j := m.snapshot(r)
 			m.mu.Unlock()
 			return j, nil
@@ -372,7 +456,8 @@ func (m *videoManager) start(token, project string) (VideoJob, error) {
 		m.mu.Unlock()
 		return VideoJob{}, videoErr("INTERNAL")
 	}
-	rec := &videoJobRecord{Job: VideoJob{ID: id, ProjectID: project, OwnerID: owner, Name: "视频", State: "preparing", UpdatedAt: time.Now().Unix()}, ScriptHash: scriptHash}
+	rec := &videoJobRecord{Job: VideoJob{ID: id, ProjectID: project, OwnerID: owner, Name: "视频", State: "preparing", UpdatedAt: time.Now().Unix()}, ScriptHash: scriptHash, Targets: append([]VideoTargetRequest(nil), targets...)}
+	for _, t := range targets { rec.Job.Targets = append(rec.Job.Targets, VideoOutput{ID:t.ID, Filename:t.Filename, Width:t.Width, Height:t.Height, FPS:t.FPS, Status:"queued"}) }
 	m.jobs[id] = rec
 	m.active = id
 	m.persistLocked(rec)
@@ -380,6 +465,12 @@ func (m *videoManager) start(token, project string) (VideoJob, error) {
 	job := rec.Job
 	go m.run(rec, token)
 	return job, nil
+}
+
+func sameVideoTargets(a, b []VideoTargetRequest) bool {
+	if len(a) != len(b) { return false }
+	for i := range a { if a[i] != b[i] { return false } }
+	return true
 }
 func (m *videoManager) update(rec *videoJobRecord, state, code string, progress *float64) {
 	m.mu.Lock()
@@ -720,7 +811,14 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 		return e
 	}
 	output := filepath.Join(outDir, "final.mp4")
-	cmd := exec.Command(nodePath, worker, "--project", rec.DataDir, "--out", output)
+	args := []string{worker, "--project", rec.DataDir, "--out", output}
+	if len(rec.Targets) > 0 {
+		output = outDir
+		targetJSON, err := json.Marshal(rec.Targets)
+		if err != nil { return videoErr("INVALID_TARGETS") }
+		args = []string{worker, "--project", rec.DataDir, "--out", output, "--targets", string(targetJSON)}
+	}
+	cmd := exec.Command(nodePath, args...)
 	cache := m.environmentCache()
 	if e = os.MkdirAll(cache, 0700); e != nil {
 		return e
@@ -758,6 +856,8 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 	go io.Copy(io.Discard, stderr)
 	scanner := bufioNewScanner(stdout)
 	workerError := ""
+	batchDone := false
+	completedTargets := map[string]string{}
 	for scanner.Scan() {
 		var ev struct {
 			Type     string  `json:"type"`
@@ -765,6 +865,11 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 			Progress float64 `json:"progress"`
 			Output   string  `json:"output"`
 			Code     string  `json:"code"`
+			TargetID string `json:"targetId"`
+			ErrorCode string `json:"errorCode"`
+			Outputs []struct { TargetID string `json:"targetId"`; Output string `json:"output"` } `json:"outputs"`
+			Failed int `json:"failed"`
+			Succeeded int `json:"succeeded"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &ev) != nil {
 			continue
@@ -776,9 +881,26 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 			}
 		case "progress":
 			if ev.Progress >= 0 && ev.Progress <= 1 {
+				if len(rec.Targets) > 0 {
+					m.updateTarget(rec, ev.TargetID, "rendering", "")
+				}
 				p := ev.Progress
 				m.update(rec, "rendering", "", &p)
 			}
+		case "target-start":
+			m.updateTarget(rec, ev.TargetID, "rendering", "")
+		case "target-complete":
+			if path, ok := expectedTargetOutput(outDir, rec.Targets, ev.TargetID, ev.Output); ok {
+				if st, statErr := os.Stat(path); statErr == nil && st.Mode().IsRegular() && st.Size() > 0 {
+					completedTargets[ev.TargetID] = path
+					m.updateTarget(rec, ev.TargetID, "completed", "")
+				}
+			}
+		case "target-failed":
+			m.updateTarget(rec, ev.TargetID, "failed", videoErrorCode(videoErr(ev.ErrorCode)))
+		case "batch-complete":
+			batchDone = true
+			for _, output := range ev.Outputs { if path, ok := expectedTargetOutput(outDir, rec.Targets, output.TargetID, output.Output); ok { if _, done := completedTargets[output.TargetID]; done { completedTargets[output.TargetID] = path } } }
 		case "error":
 			workerError = videoErrorCode(videoErr(ev.Code))
 			if workerError == "CANCELLED" {
@@ -807,6 +929,16 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 	if cancelled {
 		return videoErr("CANCELLED")
 	}
+	if len(rec.Targets) > 0 {
+		if !batchDone || len(completedTargets) == 0 { return videoErr("RENDER_FAILED") }
+		rec.Output = filepath.Join(outDir, "manifest.json")
+		rec.TargetOutputs, rec.TargetCapabilities = map[string]string{}, map[string]string{}
+		for id, path := range completedTargets { cap, _ := randomToken(); rec.TargetOutputs[id], rec.TargetCapabilities[id] = path, cap }
+		m.ensureStream()
+		if err := writeVideoBatchManifest(outDir, rec); err != nil { return videoErr("SAVE_FAILED") }
+		m.update(rec, "completed", "", nil)
+		return nil
+	}
 	st, e := os.Stat(output)
 	if e != nil || !st.Mode().IsRegular() || st.Size() == 0 {
 		return videoErr("RENDER_FAILED")
@@ -817,6 +949,23 @@ func startVideoWorker(m *videoManager, rec *videoJobRecord, runtimeDir string) e
 	m.ensureStream()
 	m.update(rec, "completed", "", nil)
 	return nil
+}
+
+func writeVideoBatchManifest(outDir string, rec *videoJobRecord) error {
+	type manifestTarget struct {
+		VideoTargetRequest
+		Status string `json:"status"`
+		ErrorCode string `json:"errorCode,omitempty"`
+	}
+	manifest := struct {
+		Schema string `json:"schema"`
+		ProjectID string `json:"projectId"`
+		ScriptSHA256 string `json:"scriptSha256"`
+		Targets []manifestTarget `json:"targets"`
+	}{Schema:"octop-video-output-manifest/1", ProjectID:rec.Job.ProjectID, ScriptSHA256:rec.ScriptHash}
+	for i, t := range rec.Targets { item := manifestTarget{VideoTargetRequest:t}; if i < len(rec.Job.Targets) { item.Status, item.ErrorCode = rec.Job.Targets[i].Status, rec.Job.Targets[i].ErrorCode }; manifest.Targets = append(manifest.Targets, item) }
+	b, err := json.MarshalIndent(manifest, "", "  "); if err != nil { return err }
+	return os.WriteFile(filepath.Join(outDir, "manifest.json"), b, 0600)
 }
 
 // Isolated scanner constructor keeps worker output bounded and line-oriented.
@@ -845,18 +994,19 @@ func (m *videoManager) ensureStream() {
 }
 func (m *videoManager) serveVideo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 3 || r.Method != http.MethodGet && r.Method != http.MethodHead {
+	if (len(parts) != 3 && len(parts) != 4) || r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.NotFound(w, r)
 		return
 	}
 	m.mu.Lock()
 	rec := m.jobs[parts[1]]
-	if rec == nil || rec.Job.State != "completed" || rec.Capability != parts[2] {
+	if rec == nil || rec.Job.State != "completed" || (len(parts) == 3 && rec.Capability != parts[2]) || (len(parts) == 4 && rec.TargetCapabilities[parts[3]] != parts[2]) {
 		m.mu.Unlock()
 		http.NotFound(w, r)
 		return
 	}
 	path := rec.Output
+	if len(parts) == 4 { path = rec.TargetOutputs[parts[3]] }
 	m.mu.Unlock()
 	f, e := os.Open(path)
 	if e != nil {
@@ -982,9 +1132,11 @@ func (a *App) videoAction(action string, payload map[string]json.RawMessage) (an
 		return nil, videoErr("INTERNAL")
 	}
 	var token, id, project string
+	var targets []VideoTargetRequest
 	_ = json.Unmarshal(payload["token"], &token)
 	_ = json.Unmarshal(payload["jobId"], &id)
 	_ = json.Unmarshal(payload["projectId"], &project)
+	_ = json.Unmarshal(payload["targets"], &targets)
 	if token == "" {
 		return nil, videoErr("AUTH_REQUIRED")
 	}
@@ -993,6 +1145,8 @@ func (a *App) videoAction(action string, payload map[string]json.RawMessage) (an
 		return a.video.environmentAction(token, action)
 	case "start":
 		return a.video.start(token, project)
+	case "start_variants":
+		return a.video.startVariants(token, project, targets)
 	case "list":
 		return a.video.list(token)
 	case "get":
@@ -1033,6 +1187,27 @@ func (a *App) videoAction(action string, payload map[string]json.RawMessage) (an
 		if e = copyVideo(output, dest); e != nil {
 			return nil, videoErr("SAVE_FAILED")
 		}
+		return map[string]bool{"saved": true}, nil
+	case "save_batch":
+		j, e := a.video.get(token, id)
+		if e != nil { return nil, e }
+		if j.State != "completed" || len(j.Targets) == 0 { return nil, videoErr("NOT_FOUND") }
+		if a.app == nil { return nil, videoErr("SAVE_FAILED") }
+		a.video.mu.Lock()
+		r := a.video.jobs[id]
+		var rec *videoJobRecord
+		if r != nil { copyRec := *r; copyRec.Job = j; rec = &copyRec }
+		a.video.mu.Unlock()
+		if rec == nil { return nil, videoErr("NOT_FOUND") }
+		dest, e := a.app.Dialog.SaveFile().SetFilename(safeVideoName(j.Name)+"-outputs.zip").AddFilter("ZIP archive", "*.zip").AttachToWindow(a.window).PromptForSingleSelection()
+		if e != nil { return nil, videoErr("SAVE_FAILED") }
+		if dest == "" { return map[string]bool{"saved": false}, nil }
+		temp, e := os.CreateTemp(filepath.Dir(rec.Output), "batch-*.zip")
+		if e != nil { return nil, videoErr("SAVE_FAILED") }
+		tempPath := temp.Name(); _ = temp.Close(); _ = os.Remove(tempPath)
+		if e = zipVideoBatch(rec, tempPath); e != nil { return nil, videoErr("SAVE_FAILED") }
+		defer os.Remove(tempPath)
+		if e = copyVideo(tempPath, dest); e != nil { return nil, videoErr("SAVE_FAILED") }
 		return map[string]bool{"saved": true}, nil
 	default:
 		return nil, videoErr("INTERNAL")
@@ -1079,4 +1254,24 @@ func copyVideo(src, dst string) error {
 		return e
 	}
 	return ce
+}
+
+func zipVideoBatch(rec *videoJobRecord, dst string) error {
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil { return err }
+	zw := zip.NewWriter(f)
+	manifest, err := os.ReadFile(filepath.Join(filepath.Dir(rec.Output), "manifest.json"))
+	if err == nil {
+		w, e := zw.Create("manifest.json"); if e != nil { err = e } else { _, err = w.Write(manifest) }
+	}
+	for _, target := range rec.Job.Targets {
+		if err != nil { break }
+		path := rec.TargetOutputs[target.ID]
+		if path == "" { continue }
+		in, e := os.Open(path); if e != nil { err = e; break }
+		w, e := zw.Create(target.Filename); if e == nil { _, e = io.Copy(w, in) }; _ = in.Close(); if e != nil { err = e }
+	}
+	closeErr := zw.Close(); fileErr := f.Close()
+	if err != nil { _ = os.Remove(dst); return err }; if closeErr != nil { _ = os.Remove(dst); return closeErr }; if fileErr != nil { _ = os.Remove(dst); return fileErr }
+	return nil
 }
