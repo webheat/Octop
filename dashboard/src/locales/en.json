@@ -2678,6 +2678,7 @@
     "includePlugins": "Installed plugins (plugins)",
     "includeKnowledge": "Knowledge base files (knowledge)",
     "includeChats": "Chat history (including trajectories)",
+    "includeProductLibrary": "Product library media (product-library)",
     "includeChatsHint": "Chat history and trajectories can be large and are excluded by default.",
     "creating": "Backing up…",
     "uploadButton": "Upload backup",

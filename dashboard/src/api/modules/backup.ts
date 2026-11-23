@@ -11,6 +11,7 @@ export interface BackupFileItem {
   includes_plugins?: boolean;
   includes_knowledge?: boolean;
   includes_chats?: boolean;
+  includes_product_library?: boolean;
 }
 
 export interface BackupListResponse {
@@ -28,6 +29,7 @@ export interface AutoBackupSettings {
   include_plugins: boolean;
   include_knowledge: boolean;
   include_chats: boolean;
+  include_product_library: boolean;
   scheduled?: boolean;
 }
 
@@ -38,6 +40,7 @@ export interface CreateBackupOptions {
   include_plugins: boolean;
   include_knowledge: boolean;
   include_chats: boolean;
+  include_product_library: boolean;
 }
 
 export type BackupOperationKind = "create" | "restore" | "auto" | "export";
@@ -64,6 +67,7 @@ export const backupApi = {
     include_plugins: boolean;
     include_knowledge: boolean;
     include_chats: boolean;
+    include_product_library: boolean;
   }) =>
     request<{ ok: boolean } & AutoBackupSettings>("/admin/backup/auto", {
       method: "PUT",

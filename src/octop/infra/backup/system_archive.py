@@ -55,6 +55,7 @@ _WORKSPACES_DIR = "workspaces"
 _SKILL_PACKAGES_DIR = "skill-packages"
 _PLUGINS_DIR = "plugins"
 _KNOWLEDGE_DIR = "knowledge"
+_PRODUCT_LIBRARY_DIR = "product-library"
 _MANIFEST_NAME = "manifest.json"
 _SQLITE_DB_ARC = f"{_DB_DIR}/octop.db"
 _PG_DUMP_ARC = f"{_DB_DIR}/octop.dump"
@@ -152,6 +153,7 @@ def _build_manifest(
     include_plugins: bool,
     include_knowledge: bool,
     include_chats: bool,
+    include_product_library: bool,
 ) -> BackupManifest:
     try:
         schema_version = _current_version(pool)
@@ -181,6 +183,7 @@ def _build_manifest(
         includes_plugins=include_plugins,
         includes_knowledge=include_knowledge,
         includes_chats=include_chats,
+        includes_product_library=include_product_library,
     )
 
 
@@ -197,6 +200,7 @@ def create_system_backup(
     include_plugins: bool = True,
     include_knowledge: bool = True,
     include_chats: bool = False,
+    include_product_library: bool = True,
 ) -> str:
     """Write a ``.tar.gz`` archive to *dest* (streamed to disk).
 
@@ -205,6 +209,11 @@ def create_system_backup(
     because thread/session history usually dominates archive size. Restore
     keeps live chats and omitted directories when the manifest says they were
     not packed.
+
+    ``include_product_library`` packs ``~/.octop/product-library`` — the
+    uploaded product images the database only stores metadata for. It defaults
+    to True so the media survives a restore; set it to False to keep large
+    image sets out of the archive.
 
     Returns the suggested basename (``octop-backup-….tar.gz``). Callers that
     need a different name should rename/move *dest* afterward.
@@ -237,6 +246,7 @@ def create_system_backup(
         include_plugins=include_plugins,
         include_knowledge=include_knowledge,
         include_chats=include_chats,
+        include_product_library=include_product_library,
     )
     filename = suggested_backup_filename()
     dest = Path(dest)
@@ -325,6 +335,13 @@ def create_system_backup(
                         tf,
                         paths.knowledge_dir,
                         _KNOWLEDGE_DIR,
+                        skip_chats=False,
+                    )
+                if include_product_library and paths.product_library_dir.is_dir():
+                    _add_dir(
+                        tf,
+                        paths.product_library_dir,
+                        _PRODUCT_LIBRARY_DIR,
                         skip_chats=False,
                     )
 
@@ -629,6 +646,14 @@ def restore_system_backup(
                 _KNOWLEDGE_DIR,
             )
 
+        restored_product_library_files = 0
+        if manifest.includes_product_library:
+            restored_product_library_files = _replace_tree_from_archive(
+                extracted,
+                paths.product_library_dir,
+                _PRODUCT_LIBRARY_DIR,
+            )
+
         preserved_chat_rows, skipped_chat_rows = (
             restore_preserved_chats(pool, saved_chats) if saved_chats is not None else (0, 0)
         )
@@ -646,6 +671,7 @@ def restore_system_backup(
         "skill_package_files": restored_skill_package_files,
         "plugin_files": restored_plugin_files,
         "knowledge_files": restored_knowledge_files,
+        "product_library_files": restored_product_library_files,
         "restore_config": restore_config,
         "chats_restored": manifest.includes_chats,
         "preserved_chat_rows": preserved_chat_rows,

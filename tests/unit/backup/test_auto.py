@@ -137,3 +137,29 @@ def test_apply_auto_backup_schedule_registers_when_enabled(tmp_path: Path) -> No
     kwargs = cron.schedule_system_job.call_args
     assert kwargs.args[0] == AUTO_BACKUP_JOB_ID
     assert kwargs.kwargs["trigger"] == "cron:0 4 * * *"
+
+
+def test_backup_config_from_payload_reads_product_library_option() -> None:
+    cfg = backup_config_from_payload(
+        {
+            "schedule": "cron:0 4 * * *",
+            "retention_count": 3,
+            "include_product_library": False,
+        }
+    )
+    assert cfg.include_product_library is False
+
+    defaults = backup_config_from_payload({"schedule": "cron:0 4 * * *", "retention_count": 3})
+    assert defaults.include_product_library is True
+
+
+def test_persist_backup_config_roundtrips_product_library(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.json"
+    load_config(cfg_path)
+    out = persist_backup_config(
+        cfg_path,
+        BackupConfig(auto_enabled=True, include_product_library=False),
+    )
+    assert out.backup.include_product_library is False
+    reloaded = load_config(cfg_path)
+    assert reloaded.backup.include_product_library is False

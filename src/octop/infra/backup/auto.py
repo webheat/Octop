@@ -114,6 +114,7 @@ def persist_backup_config(config_path: Path, backup: BackupConfig) -> OctopConfi
         "include_plugins": backup.include_plugins,
         "include_knowledge": backup.include_knowledge,
         "include_chats": backup.include_chats,
+        "include_product_library": backup.include_product_library,
     }
     _atomic_write_json(config_path, raw)
     return load_config(config_path)
@@ -145,6 +146,9 @@ def backup_config_from_payload(payload: dict[str, Any]) -> BackupConfig:
         include_plugins=bool(payload.get("include_plugins", defaults.include_plugins)),
         include_knowledge=bool(payload.get("include_knowledge", defaults.include_knowledge)),
         include_chats=bool(payload.get("include_chats", defaults.include_chats)),
+        include_product_library=bool(
+            payload.get("include_product_library", defaults.include_product_library)
+        ),
     )
 
 
@@ -161,6 +165,7 @@ def create_and_store_auto_backup(
     include_plugins: bool = True,
     include_knowledge: bool = True,
     include_chats: bool = False,
+    include_product_library: bool = True,
 ) -> tuple[BackupFileInfo, list[str]]:
     """Create a selected-content system backup with the auto prefix and prune."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -177,6 +182,7 @@ def create_and_store_auto_backup(
             include_plugins=include_plugins,
             include_knowledge=include_knowledge,
             include_chats=include_chats,
+            include_product_library=include_product_library,
         )
         filename = to_auto_backup_filename(suggested)
         entry = place_backup_file(paths, filename, tmp_path)
@@ -215,6 +221,7 @@ async def run_auto_backup(server: OctopServer) -> BackupFileInfo | None:
                 include_plugins=config.backup.include_plugins,
                 include_knowledge=config.backup.include_knowledge,
                 include_chats=config.backup.include_chats,
+                include_product_library=config.backup.include_product_library,
             )
         except Exception as exc:
             logger.exception("auto backup failed")
